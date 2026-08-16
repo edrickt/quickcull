@@ -1,0 +1,12 @@
+# Third-Party Notices
+
+## LibRaw 0.22.1
+
+QuickCull dynamically links libraw (LGPL-2.1) to decode raw image files.
+
+- License: GNU Lesser General Public License, version 2.1 (or later)
+- Source: https://github.com/LibRaw/LibRaw (tag 0.22.1)
+- The library is shipped as an unmodified `libraw.dylib` inside
+  `QuickCullCore.framework/Versions/A/Frameworks/`. As permitted by the
+  LGPL, you may replace it with your own build of the same version.
+- Build flags: `-DLIBRAW_NODLL -DNO_JPEG -DNO_JASPER -DNO_LCMS`
