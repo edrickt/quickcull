@@ -19,6 +19,7 @@ public final class AppState {
     public private(set) var importFailures: [DecodeOutcome] = []
     public private(set) var commitFailures: [TrashOutcome] = []
     public private(set) var pendingCommitCount: Int = 0
+    public private(set) var isCommitting: Bool = false
 
     public private(set) var thumbWindow: ImageWindow?
     public private(set) var displayImages: ImageWindow?
@@ -148,16 +149,19 @@ public final class AppState {
         pendingCommitCount = session?.flaggedCount ?? 0
     }
 
-    public func confirmCommit() {
-        guard let session else { return }
+    public func confirmCommit() async {
+        guard let session, !isCommitting else { return }
         let flagged = session.flaggedFiles
-        let outcomes = TrashCommit(trasher: trasher).commit(files: flagged)
+        isCommitting = true
+        let outcomes = await Task.detached(priority: .userInitiated) {
+            TrashCommit(trasher: self.trasher).commit(files: flagged)
+        }.value
         let succeeded = outcomes.filter(\.succeeded).map(\.file)
         session.remove(succeeded)
         commitFailures = outcomes.filter { !$0.succeeded }
         pendingCommitCount = 0
+        isCommitting = false
         if session.isEmpty {
-            // Nothing left to scrub: back to the empty state for a new import.
             self.session = nil
             thumbWindow = nil
             displayImages = nil

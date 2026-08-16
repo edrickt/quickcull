@@ -21,14 +21,20 @@ struct ScrubView: View {
                     appState.requestCommit()
                     showCommitConfirm = true
                 } label: {
-                    Label("Move Flagged to Trash", systemImage: "trash")
+                    if appState.isCommitting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Move Flagged to Trash", systemImage: "trash")
+                    }
                 }
-                .disabled(appState.session?.flaggedCount == 0)
+                .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting)
             }
         }
         .alert("Move \(appState.pendingCommitCount) file(s) to Trash?",
                isPresented: $showCommitConfirm) {
-            Button("Move to Trash", role: .destructive) { appState.confirmCommit() }
+            Button("Move to Trash", role: .destructive) {
+                Task { await appState.confirmCommit() }
+            }
             Button("Cancel", role: .cancel) { appState.cancelCommit() }
         } message: {
             Text("Flagged files will be removed from this session. Scrubbing continues with the rest.")

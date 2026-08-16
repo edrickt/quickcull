@@ -97,7 +97,7 @@ final class AppStateTests: XCTestCase {
         state.handle(.toggleFlag)   // flag b
         state.requestCommit()
         XCTAssertEqual(state.pendingCommitCount, 2)
-        state.confirmCommit()
+        await state.confirmCommit()
 
         XCTAssertEqual(state.session?.count, 1)
         XCTAssertEqual(state.session?.flaggedCount, 0)
@@ -118,7 +118,7 @@ final class AppStateTests: XCTestCase {
         state.handle(.next)
         state.handle(.toggleFlag)   // flag b
         state.requestCommit()
-        state.confirmCommit()
+        await state.confirmCommit()
         XCTAssertEqual(state.session?.count, 1)        // a stays
         XCTAssertEqual(state.session?.flaggedCount, 1) // a stays flagged
         XCTAssertEqual(state.commitFailures.count, 1)
@@ -132,9 +132,26 @@ final class AppStateTests: XCTestCase {
 
         state.handle(.toggleFlag)
         state.requestCommit()
-        state.confirmCommit()
+        await state.confirmCommit()
         XCTAssertNil(state.session)
         XCTAssertEqual(state.phase, .empty)
+    }
+
+    func testCommitSetsCommittingState() async throws {
+        let a = try makeRaw("a.cr2")
+        let b = try makeRaw("b.cr2")
+        let trasher = StubTrasher()
+        let state = makeState(trasher: trasher)
+        state.importFiles(urls: [a, b])
+        await waitForScrubbing(state)
+
+        state.handle(.toggleFlag)
+        state.requestCommit()
+        XCTAssertFalse(state.isCommitting)
+        await state.confirmCommit()
+        XCTAssertFalse(state.isCommitting)
+        XCTAssertEqual(state.session?.count, 1)
+        XCTAssertEqual(trasher.trashed.count, 1)
     }
 
     func testImportFailuresSurviveIntoScrubbing() async throws {

@@ -1,6 +1,6 @@
 import Foundation
 
-public protocol Trashing {
+public protocol Trashing: Sendable {
     func trash(url: URL) throws
 }
 

@@ -42,7 +42,7 @@ final class StubDecoder: RawDecoding, @unchecked Sendable {
 
 /// Deterministic fake trasher: fails for a designated set of file ids,
 /// records everything it trashed.
-final class StubTrasher: Trashing {
+final class StubTrasher: Trashing, @unchecked Sendable {
     var failIDs: Set<String> = []
     private(set) var trashed: [String] = []
 
