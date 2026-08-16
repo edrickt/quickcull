@@ -27,7 +27,8 @@ public final class AppState {
     private let decoder: RawDecoding
     private let trasher: Trashing
 
-    public init(decoder: RawDecoding = LibRawDecoder(),
+    public init(decoder: RawDecoding = RoutingDecoder(librawDecoder: LibRawDecoder(),
+                                                      imageIODecoder: ImageIODecoder()),
                 cache: ImageCacheStore = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()),
                 trasher: Trashing = FileManagerTrasher()) {
         self.decoder = decoder

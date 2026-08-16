@@ -47,7 +47,7 @@ final class AppStateTests: XCTestCase {
 
     func testImportFiltersUnsupportedAndDedupes() async throws {
         let a = try makeRaw("a.cr2")
-        let b = try makeRaw("b.jpg")
+        let b = try makeRaw("b.txt")
         let state = makeState()
         state.importFiles(urls: [a, b, a])
         await waitForScrubbing(state)
@@ -212,13 +212,61 @@ final class AppStateTests: XCTestCase {
     func testPartialUnsupportedRecordsFailures() async throws {
         let a = try makeRaw("a.cr2")
         let b = try makeRaw("b.cr2")
-        let jpg = try makeRaw("c.jpg")
+        let txt = try makeRaw("c.txt")
         let state = makeState()
-        state.importFiles(urls: [a, b, jpg])
+        state.importFiles(urls: [a, b, txt])
         await waitForScrubbing(state)
         XCTAssertEqual(state.session?.count, 2)
         XCTAssertEqual(state.importFailures.count, 1)
         XCTAssertEqual(state.importFailures.first?.error, .cannotOpen("Unsupported format"))
+    }
+
+
+    func testMixedRawAndImageImportThroughDefaultDecoder() async throws {
+        let bundle = Bundle(for: Self.self)
+        let rawURLs = try FileManager.default.contentsOfDirectory(
+            at: bundle.resourceURL!.appendingPathComponent("Fixtures/raws", isDirectory: true),
+            includingPropertiesForKeys: nil)
+            .filter { RawFileIdentity.isSupported($0) && !$0.lastPathComponent.hasPrefix("bad_") }
+        XCTAssertEqual(rawURLs.count, 8)
+
+        // One real JPEG side by side with the raws.
+        let jpgURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qc-mixed-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: jpgURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: jpgURL) }
+        let jpgFile = jpgURL.appendingPathComponent("sidecar.jpg")
+        var bytes = [UInt8](repeating: 120, count: 32 * 32 * 3)
+        let data = Data(bytes)
+        let provider = CGDataProvider(data: data as CFData)!
+        let image = CGImage(width: 32, height: 32, bitsPerComponent: 8, bitsPerPixel: 24,
+                            bytesPerRow: 32 * 3, space: CGColorSpaceCreateDeviceRGB(),
+                            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                            provider: provider, decode: nil, shouldInterpolate: false,
+                            intent: .defaultIntent)!
+        let sink = CGImageDestinationCreateWithURL(jpgFile as CFURL, "public.jpeg" as CFString, 1, nil)!
+        CGImageDestinationAddImage(sink, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(sink))
+
+        let cacheBase = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qc-mixed-cache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheBase, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: cacheBase) }
+
+        // Default decoder (RoutingDecoder) with a real cache.
+        let state = AppState(cache: ImageCacheStore(baseURL: cacheBase), trasher: StubTrasher())
+        state.importFiles(urls: rawURLs + [jpgFile])
+
+        for _ in 0..<600 {
+            if state.phase == .scrubbing { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertEqual(state.phase, .scrubbing)
+        XCTAssertEqual(state.session?.count, 9)
+        XCTAssertTrue(state.importFailures.isEmpty)
+
+        await state.displayImages?.waitUntilSettled()
+        XCTAssertNotNil(state.displayImages?.image(at: 0))
     }
 
 }

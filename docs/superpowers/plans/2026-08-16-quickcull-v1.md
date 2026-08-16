@@ -978,7 +978,7 @@ import Foundation
 
 /// Supported raw extensions for v1, per the design spec.
 public enum RawFileIdentity {
-    public static let supportedExtensions: Set<String> = [
+    public static let librawExtensions: Set<String> = [
         "cr2", "cr3",      // Canon
         "nef", "nrw",      // Nikon
         "arw", "srf", "sr2", // Sony
@@ -995,8 +995,23 @@ public enum RawFileIdentity {
         "erf",             // Epson
     ]
 
+    public static let imageIOExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif",
+    ]
+
+    public static let supportedExtensions: Set<String> =
+        librawExtensions.union(imageIOExtensions)
+
     public static func isSupported(_ url: URL) -> Bool {
         supportedExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    /// The decoder pipeline for a file, or nil for unsupported formats.
+    public static func decoderKind(for url: URL) -> DecoderKind? {
+        let ext = url.pathExtension.lowercased()
+        if librawExtensions.contains(ext) { return .libraw }
+        if imageIOExtensions.contains(ext) { return .imageIO }
+        return nil
     }
 
     /// Stable, unique identity for a file: the standardized absolute path.
@@ -2690,7 +2705,8 @@ public final class AppState {
     private let decoder: RawDecoding
     private let trasher: Trashing
 
-    public init(decoder: RawDecoding = LibRawDecoder(),
+    public init(decoder: RawDecoding = RoutingDecoder(librawDecoder: LibRawDecoder(),
+                                                      imageIODecoder: ImageIODecoder()),
                 cache: ImageCacheStore = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()),
                 trasher: Trashing = FileManagerTrasher()) {
         self.decoder = decoder

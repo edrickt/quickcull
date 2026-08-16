@@ -23,10 +23,13 @@ See `docs/superpowers/specs/` for the design.
 
 ## Supported formats
 
-Canon (CR2, CR3), Nikon (NEF, NRW), Sony (ARW, SRF, SR2), Fujifilm (RAF),
-Olympus/OM System (ORF), Panasonic (RW2), Pentax (PEF, DNG), Leica/Ricoh
-(DNG), Hasselblad (3FR, FFF), Phase One (IIQ), Sigma (X3F), Samsung (SRW),
-Kodak (DCR, KDC), Epson (ERF).
+Raw (decoded via LibRaw): Canon (CR2, CR3), Nikon (NEF, NRW), Sony (ARW, SRF,
+SR2), Fujifilm (RAF), Olympus/OM System (ORF), Panasonic (RW2), Pentax (PEF,
+DNG), Leica/Ricoh (DNG), Hasselblad (3FR, FFF), Phase One (IIQ), Sigma (X3F),
+Samsung (SRW), Kodak (DCR, KDC), Epson (ERF).
+
+Common formats (decoded via ImageIO, EXIF orientation baked in): JPEG
+(JPG/JPEG), PNG, HEIC/HEIF.
 
 ## Controls
 
