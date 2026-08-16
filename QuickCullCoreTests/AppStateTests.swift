@@ -176,4 +176,49 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.phase, .empty)
         XCTAssertNil(state.session)
     }
+
+    func testRealImportFlowPopulatesDisplayImage() async throws {
+        let bundle = Bundle(for: Self.self)
+        let urls = try FileManager.default.contentsOfDirectory(
+            at: bundle.resourceURL!.appendingPathComponent("Fixtures/raws", isDirectory: true),
+            includingPropertiesForKeys: nil)
+            .filter { RawFileIdentity.isSupported($0) && !$0.lastPathComponent.hasPrefix("bad_") }
+        XCTAssertEqual(urls.count, 8)
+
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qc-flow-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let cache = ImageCacheStore(baseURL: base.appendingPathComponent("cache", isDirectory: true))
+
+        let state = AppState(decoder: LibRawDecoder(), cache: cache, trasher: StubTrasher())
+        state.importFiles(urls: urls)
+
+        for _ in 0..<600 {   // real decode of 8 raws takes seconds
+            if state.phase == .scrubbing { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertEqual(state.phase, .scrubbing)
+        XCTAssertEqual(state.session?.count, 8)
+        XCTAssertTrue(state.importFailures.isEmpty)
+
+        await state.displayImages?.waitUntilSettled()
+        XCTAssertNotNil(state.displayImages?.image(at: 0),
+                        "display image must materialize from the real decode → cache → load chain")
+        await state.thumbWindow?.waitUntilSettled()
+        XCTAssertNotNil(state.thumbWindow?.image(at: 0))
+    }
+
+    func testPartialUnsupportedRecordsFailures() async throws {
+        let a = try makeRaw("a.cr2")
+        let b = try makeRaw("b.cr2")
+        let jpg = try makeRaw("c.jpg")
+        let state = makeState()
+        state.importFiles(urls: [a, b, jpg])
+        await waitForScrubbing(state)
+        XCTAssertEqual(state.session?.count, 2)
+        XCTAssertEqual(state.importFailures.count, 1)
+        XCTAssertEqual(state.importFailures.first?.error, .cannotOpen("Unsupported format"))
+    }
+
 }

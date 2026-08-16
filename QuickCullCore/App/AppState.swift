@@ -57,6 +57,12 @@ public final class AppState {
         }
 
         let files = supported.map(SessionFile.init)
+        // Files the user picked that we don't support: reported in the
+        // failure banner instead of silently disappearing from the count.
+        let unsupportedFailures = unique
+            .filter { !RawFileIdentity.isSupported($0) }
+            .map { DecodeOutcome(file: SessionFile(url: $0),
+                                 error: .cannotOpen("Unsupported format")) }
         session = Session(files: files)
         importFailures = []
         commitFailures = []
@@ -70,7 +76,7 @@ public final class AppState {
                 case .progress(let completed, let total):
                     phase = .decoding(completed: completed, total: total)
                 case .completed(let outcomes):
-                    importFailures = outcomes.filter { $0.error != nil }
+                    importFailures = unsupportedFailures + outcomes.filter { $0.error != nil }
                     let failed = outcomes.filter { $0.error != nil }.map(\.file)
                     if !failed.isEmpty {
                         // Spec: the session proceeds without the failed files.

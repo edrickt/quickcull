@@ -1819,11 +1819,14 @@ public struct WindowPolicy {
 ```swift
 import CoreGraphics
 import Foundation
+import Observation
 
 /// Holds the filmstrip window: at most 2*radius+1 (61) thumbnail renderings,
 /// loaded from the cached full-res JPEGs. Loads current-first, then outward;
-/// evicts everything outside the window immediately.
+/// evicts everything outside the window immediately. @Observable so the UI
+/// re-renders when async loads populate the thumbnails.
 @MainActor
+@Observable
 public final class SlidingWindow {
     public let radius: Int
     public let count: Int
@@ -1875,8 +1878,10 @@ public final class SlidingWindow {
 }
 
 /// Holds the main-view display renderings: current ±1 (max 3 images),
-/// sized by the loader (2× screen long edge in production).
+/// sized by the loader (2× screen long edge in production). @Observable so
+/// the UI re-renders when async loads populate the images.
 @MainActor
+@Observable
 public final class DisplayImageProvider {
     public private(set) var images: [Int: CGImage] = [:]
 
@@ -2717,6 +2722,12 @@ public final class AppState {
         }
 
         let files = supported.map(SessionFile.init)
+        // Files the user picked that we don't support: reported in the
+        // failure banner instead of silently disappearing from the count.
+        let unsupportedFailures = unique
+            .filter { !RawFileIdentity.isSupported($0) }
+            .map { DecodeOutcome(file: SessionFile(url: $0),
+                                 error: .cannotOpen("Unsupported format")) }
         session = Session(files: files)
         importFailures = []
         commitFailures = []
@@ -2730,7 +2741,7 @@ public final class AppState {
                 case .progress(let completed, let total):
                     phase = .decoding(completed: completed, total: total)
                 case .completed(let outcomes):
-                    importFailures = outcomes.filter { $0.error != nil }
+                    importFailures = unsupportedFailures + outcomes.filter { $0.error != nil }
                     let failed = outcomes.filter { $0.error != nil }.map(\.file)
                     if !failed.isEmpty {
                         // Spec: the session proceeds without the failed files.

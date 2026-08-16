@@ -93,4 +93,38 @@ final class SlidingWindowTests: XCTestCase {
         XCTAssertNotNil(provider.image(at: 51))
         XCTAssertNil(provider.image(at: 48))
     }
+
+    func testSlidingWindowThumbnailPopulationIsObservable() async {
+        let window = SlidingWindow(radius: 30, count: count, thumbnailLoader: makeLoader())
+        var fired = false
+        withObservationTracking {
+            _ = window.image(at: 0)
+        } onChange: {
+            fired = true
+        }
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+        // onChange is delivered on a later runloop turn.
+        for _ in 0..<10 where !fired {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(fired, "thumbnail population must fire observation")
+    }
+
+    func testDisplayProviderImagePopulationIsObservable() async {
+        let provider = DisplayImageProvider(loader: makeLoader())
+        var fired = false
+        withObservationTracking {
+            _ = provider.image(at: 0)
+        } onChange: {
+            fired = true
+        }
+        provider.setCurrent(0)
+        await provider.waitUntilSettled()
+        for _ in 0..<10 where !fired {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(fired, "display image population must fire observation")
+    }
+
 }

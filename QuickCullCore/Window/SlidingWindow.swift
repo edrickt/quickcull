@@ -1,10 +1,12 @@
 import CoreGraphics
 import Foundation
+import Observation
 
 /// Holds the filmstrip window: at most 2*radius+1 (61) thumbnail renderings,
 /// loaded from the cached full-res JPEGs. Loads current-first, then outward;
 /// evicts everything outside the window immediately.
 @MainActor
+@Observable
 public final class SlidingWindow {
     public let radius: Int
     public let count: Int
@@ -58,6 +60,7 @@ public final class SlidingWindow {
 /// Holds the main-view display renderings: current ±1 (max 3 images),
 /// sized by the loader (2× screen long edge in production).
 @MainActor
+@Observable
 public final class DisplayImageProvider {
     public private(set) var images: [Int: CGImage] = [:]
 
