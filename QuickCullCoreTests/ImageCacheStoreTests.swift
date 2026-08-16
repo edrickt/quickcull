@@ -8,9 +8,7 @@ final class ImageCacheStoreTests: XCTestCase {
     private var store: ImageCacheStore!
 
     override func setUp() async throws {
-        base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-tests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        base = try TestFixtures.makeTempDir(name: "tests")
         store = ImageCacheStore(baseURL: base)
     }
 
@@ -18,44 +16,24 @@ final class ImageCacheStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: base)
     }
 
-    private func makeFile(_ name: String, size: Int = 100) throws -> SessionFile {
-        let url = base.appendingPathComponent(name)
-        try Data(repeating: 0xAB, count: size).write(to: url)
-        return SessionFile(url: url)
-    }
-
-    private func makeBitmap() -> RawBitmap {
-        let width = 32, height = 16
-        var bytes = [UInt8](repeating: 128, count: width * height * 3)
-        for i in 0..<width * height { bytes[i * 3] = UInt8(i % 256) }
-        let data = Data(bytes)
-        let provider = CGDataProvider(data: data as CFData)!
-        let image = CGImage(width: width, height: height, bitsPerComponent: 8,
-                            bitsPerPixel: 24, bytesPerRow: width * 3,
-                            space: CGColorSpaceCreateDeviceRGB(),
-                            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                            provider: provider, decode: nil, shouldInterpolate: false,
-                            intent: .defaultIntent)!
-        return RawBitmap(image: image, width: width, height: height, flip: 0)
-    }
-
     func testWipeRecreatesEmptyDirectory() async throws {
-        let file = try makeFile("x.cr2")
-        _ = try await store.storeJPEG(makeBitmap(), for: file)
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "x.cr2", in: base))
+        _ = try await store.storeJPEG(RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+            width: 32, height: 16, flip: 0), for: file)
         try await store.wipe()
         let contents = try FileManager.default.contentsOfDirectory(atPath: base.path)
         XCTAssertTrue(contents.isEmpty)
     }
 
     func testCacheKeyIsStableForUnchangedFile() async throws {
-        let file = try makeFile("a.cr2")
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
         let key1 = try await store.cacheURL(for: file)
         let key2 = try await store.cacheURL(for: file)
         XCTAssertEqual(key1, key2)
     }
 
     func testCacheKeyChangesWhenMtimeChanges() async throws {
-        let file = try makeFile("a.cr2")
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
         let key1 = try await store.cacheURL(for: file)
         // touch the file: mtime changes
         try Data([0x01]).write(to: file.url)
@@ -64,8 +42,9 @@ final class ImageCacheStoreTests: XCTestCase {
     }
 
     func testStoreJPEGWritesDecodableJPEGAtQ75() async throws {
-        let file = try makeFile("a.cr2")
-        let destination = try await store.storeJPEG(makeBitmap(), for: file)
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
+        let destination = try await store.storeJPEG(RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+            width: 32, height: 16, flip: 0), for: file)
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
         guard let source = CGImageSourceCreateWithURL(destination as CFURL, nil) else {
             return XCTFail("not a decodable image")
@@ -77,8 +56,9 @@ final class ImageCacheStoreTests: XCTestCase {
     }
 
     func testStoreJPEGWritesNoOrientationTag() async throws {
-        let file = try makeFile("a.cr2")
-        var bitmap = makeBitmap()
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
+        var bitmap = RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+            width: 32, height: 16, flip: 0)
         bitmap = RawBitmap(image: bitmap.image, width: bitmap.width,
                            height: bitmap.height, flip: 5)
         let destination = try await store.storeJPEG(bitmap, for: file)
@@ -93,25 +73,29 @@ final class ImageCacheStoreTests: XCTestCase {
     }
 
     func testStoreJPEGLeavesNoTmpFiles() async throws {
-        let file = try makeFile("a.cr2")
-        _ = try await store.storeJPEG(makeBitmap(), for: file)
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
+        _ = try await store.storeJPEG(RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+            width: 32, height: 16, flip: 0), for: file)
         let names = try FileManager.default.contentsOfDirectory(atPath: base.path)
         XCTAssertFalse(names.contains { $0.hasSuffix(".tmp") })
     }
 
     func testDeleteCachedJPEGRemovesFile() async throws {
-        let file = try makeFile("a.cr2")
-        let destination = try await store.storeJPEG(makeBitmap(), for: file)
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
+        let destination = try await store.storeJPEG(RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+            width: 32, height: 16, flip: 0), for: file)
         await store.deleteCachedJPEG(for: file)
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
     func testStoreJPEGReplacesExistingEntryAtomically() async throws {
-        let file = try makeFile("a.cr2")
-        let first = try await store.storeJPEG(makeBitmap(), for: file)
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
+        let first = try await store.storeJPEG(RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+            width: 32, height: 16, flip: 0), for: file)
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
         // Overwrite; the entry must still exist and stay decodable.
-        let second = try await store.storeJPEG(makeBitmap(), for: file)
+        let second = try await store.storeJPEG(RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+            width: 32, height: 16, flip: 0), for: file)
         XCTAssertEqual(first, second)
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
         guard let source = CGImageSourceCreateWithURL(second as CFURL, nil) else {

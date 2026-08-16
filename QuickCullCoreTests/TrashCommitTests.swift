@@ -2,12 +2,8 @@ import XCTest
 @testable import QuickCullCore
 
 final class TrashCommitTests: XCTestCase {
-    private func makeFiles(_ names: [String]) -> [SessionFile] {
-        names.map { SessionFile(url: URL(fileURLWithPath: "/tmp/shoot/\($0)")) }
-    }
-
     func testCommitTrashesEveryFile() {
-        let files = makeFiles(["a.cr2", "b.cr2"])
+        let files = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
         let trasher = StubTrasher()
         let outcomes = TrashCommit(trasher: trasher).commit(files: files)
         XCTAssertEqual(outcomes.count, 2)
@@ -16,7 +12,7 @@ final class TrashCommitTests: XCTestCase {
     }
 
     func testCommitReportsPerFileFailuresAndKeepsGoing() {
-        let files = makeFiles(["a.cr2", "bad.cr2", "c.cr2"])
+        let files = TestFixtures.makeFiles(["a.cr2", "bad.cr2", "c.cr2"])
         let trasher = StubTrasher()
         trasher.failIDs = ["/tmp/shoot/bad.cr2"]
         let outcomes = TrashCommit(trasher: trasher).commit(files: files)
@@ -28,9 +24,7 @@ final class TrashCommitTests: XCTestCase {
     func testFileManagerTrasherMovesRealFileToTrash() throws {
         // Real trash call against a temp file. On volumes without a Trash
         // location (CI sandboxes), the failure mode itself is asserted.
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-trash-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = try TestFixtures.makeTempDir(name: "trash")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let url = dir.appendingPathComponent("photo.cr2")

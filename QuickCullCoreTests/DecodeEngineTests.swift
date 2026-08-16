@@ -3,17 +3,6 @@ import XCTest
 @testable import QuickCullCore
 
 final class DecodeEngineTests: XCTestCase {
-    private func makeTempCache() async throws -> (ImageCacheStore, URL) {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-engine-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return (ImageCacheStore(baseURL: base), base)
-    }
-
-    private func makeFiles(_ names: [String]) -> [SessionFile] {
-        names.map { SessionFile(url: URL(fileURLWithPath: "/tmp/shoot/\($0)")) }
-    }
-
     private func collect(_ stream: AsyncStream<DecodeEngine.Event>) async -> [DecodeEngine.Event] {
         var events: [DecodeEngine.Event] = []
         for await event in stream { events.append(event) }
@@ -21,9 +10,9 @@ final class DecodeEngineTests: XCTestCase {
     }
 
     func testDecodesEveryFileExactlyOnce() async throws {
-        let files = makeFiles((0..<20).map { "img_\($0).cr2" })
+        let files = TestFixtures.makeFiles((0..<20).map { "img_\($0).cr2" })
         let decoder = StubDecoder()
-        let (cache, base) = try await makeTempCache()
+        let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         let engine = DecodeEngine(decoder: decoder, cache: cache)
 
@@ -38,9 +27,9 @@ final class DecodeEngineTests: XCTestCase {
     }
 
     func testFailuresAreCollectedNotFatal() async throws {
-        let files = makeFiles(["ok.cr2", "bad.cr2", "also_ok.cr2"])
+        let files = TestFixtures.makeFiles(["ok.cr2", "bad.cr2", "also_ok.cr2"])
         let decoder = StubDecoder(failIDs: ["/tmp/shoot/bad.cr2"])
-        let (cache, base) = try await makeTempCache()
+        let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         let engine = DecodeEngine(decoder: decoder, cache: cache)
 
@@ -55,8 +44,8 @@ final class DecodeEngineTests: XCTestCase {
     }
 
     func testProgressReachesTotalAndIsMonotonic() async throws {
-        let files = makeFiles((0..<16).map { "img_\($0).nef" })
-        let (cache, base) = try await makeTempCache()
+        let files = TestFixtures.makeFiles((0..<16).map { "img_\($0).nef" })
+        let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         let engine = DecodeEngine(decoder: StubDecoder(), cache: cache)
 
@@ -77,8 +66,8 @@ final class DecodeEngineTests: XCTestCase {
     }
 
     func testDecodedJPEGsAreWrittenToCache() async throws {
-        let files = makeFiles(["a.cr2", "b.cr2"])
-        let (cache, base) = try await makeTempCache()
+        let files = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
+        let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         let engine = DecodeEngine(decoder: StubDecoder(), cache: cache)
 
@@ -99,9 +88,9 @@ final class DecodeEngineTests: XCTestCase {
     }
 
     func testCancellationStopsWorkers() async throws {
-        let files = makeFiles((0..<20).map { "img_\($0).cr2" })
+        let files = TestFixtures.makeFiles((0..<20).map { "img_\($0).cr2" })
         let decoder = SlowStubDecoder(delay: 50_000_000)   // 50 ms per decode
-        let (cache, base) = try await makeTempCache()
+        let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         let engine = DecodeEngine(decoder: decoder, cache: cache, workerLimit: 2)
 
@@ -136,7 +125,7 @@ final class DecodeEngineTests: XCTestCase {
             .filter { RawFileIdentity.isSupported($0) && !$0.lastPathComponent.hasPrefix("bad_") }
         XCTAssertEqual(rawURLs.count, 8)
 
-        let (cache, base) = try await makeTempCache()
+        let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         let engine = DecodeEngine(decoder: LibRawDecoder(), cache: cache)
 

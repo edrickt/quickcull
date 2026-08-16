@@ -8,20 +8,12 @@ final class AppStateTests: XCTestCase {
     private var cache: ImageCacheStore!
 
     override func setUp() async throws {
-        tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-state-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        tempDir = try TestFixtures.makeTempDir(name: "state")
         cache = ImageCacheStore(baseURL: tempDir.appendingPathComponent("cache", isDirectory: true))
     }
 
     override func tearDown() async throws {
         try? FileManager.default.removeItem(at: tempDir)
-    }
-
-    private func makeRaw(_ name: String) throws -> URL {
-        let url = tempDir.appendingPathComponent(name)
-        try Data(repeating: 7, count: 16).write(to: url)
-        return url
     }
 
     private func makeState(decoder: RawDecoding = StubDecoder(),
@@ -46,8 +38,8 @@ final class AppStateTests: XCTestCase {
     }
 
     func testImportFiltersUnsupportedAndDedupes() async throws {
-        let a = try makeRaw("a.cr2")
-        let b = try makeRaw("b.txt")
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.txt", in: tempDir)
         let state = makeState()
         state.importFiles(urls: [a, b, a])
         await waitForScrubbing(state)
@@ -55,8 +47,8 @@ final class AppStateTests: XCTestCase {
     }
 
     func testFlagsClearOnNewImport() async throws {
-        let a = try makeRaw("a.cr2")
-        let b = try makeRaw("b.cr2")
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
         let state = makeState()
         state.importFiles(urls: [a])
         await waitForScrubbing(state)
@@ -68,7 +60,7 @@ final class AppStateTests: XCTestCase {
     }
 
     func testHandleMovesAndFlags() async throws {
-        let files = try (0..<3).map { try makeRaw("f\($0).cr2") }
+        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "f\($0).cr2", in: tempDir) }
         let state = makeState()
         state.importFiles(urls: files)
         await waitForScrubbing(state)
@@ -84,9 +76,9 @@ final class AppStateTests: XCTestCase {
     }
 
     func testCommitRemovesFlaggedAndContinues() async throws {
-        let a = try makeRaw("a.cr2")
-        let b = try makeRaw("b.cr2")
-        let c = try makeRaw("c.cr2")
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let c = try TestFixtures.makeRawFile(named: "c.cr2", in: tempDir)
         let trasher = StubTrasher()
         let state = makeState(trasher: trasher)
         state.importFiles(urls: [a, b, c])
@@ -106,8 +98,8 @@ final class AppStateTests: XCTestCase {
     }
 
     func testCommitFailureKeepsFlag() async throws {
-        let a = try makeRaw("a.cr2")
-        let b = try makeRaw("b.cr2")
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
         let trasher = StubTrasher()
         trasher.failIDs = [a.path]
         let state = makeState(trasher: trasher)
@@ -125,7 +117,7 @@ final class AppStateTests: XCTestCase {
     }
 
     func testCommitOfEverythingReturnsToEmptyState() async throws {
-        let a = try makeRaw("a.cr2")
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let state = makeState()
         state.importFiles(urls: [a])
         await waitForScrubbing(state)
@@ -138,8 +130,8 @@ final class AppStateTests: XCTestCase {
     }
 
     func testCommitSetsCommittingState() async throws {
-        let a = try makeRaw("a.cr2")
-        let b = try makeRaw("b.cr2")
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
         let trasher = StubTrasher()
         let state = makeState(trasher: trasher)
         state.importFiles(urls: [a, b])
@@ -155,8 +147,8 @@ final class AppStateTests: XCTestCase {
     }
 
     func testImportFailuresSurviveIntoScrubbing() async throws {
-        let ok = try makeRaw("ok.cr2")
-        let bad = try makeRaw("bad.cr2")
+        let ok = try TestFixtures.makeRawFile(named: "ok.cr2", in: tempDir)
+        let bad = try TestFixtures.makeRawFile(named: "bad.cr2", in: tempDir)
         let state = makeState(decoder: StubDecoder(failIDs: [bad.path]))
         state.importFiles(urls: [ok, bad])
         await waitForScrubbing(state)
@@ -171,8 +163,8 @@ final class AppStateTests: XCTestCase {
     }
 
     func testFailedFilesAreRemovedFromSession() async throws {
-        let ok = try makeRaw("ok.cr2")
-        let bad = try makeRaw("bad.cr2")
+        let ok = try TestFixtures.makeRawFile(named: "ok.cr2", in: tempDir)
+        let bad = try TestFixtures.makeRawFile(named: "bad.cr2", in: tempDir)
         let state = makeState(decoder: StubDecoder(failIDs: [bad.path]))
         state.importFiles(urls: [ok, bad])
         await waitForScrubbing(state)
@@ -183,8 +175,8 @@ final class AppStateTests: XCTestCase {
     }
 
     func testAllFailedReturnsToEmptyState() async throws {
-        let bad1 = try makeRaw("bad1.cr2")
-        let bad2 = try makeRaw("bad2.cr2")
+        let bad1 = try TestFixtures.makeRawFile(named: "bad1.cr2", in: tempDir)
+        let bad2 = try TestFixtures.makeRawFile(named: "bad2.cr2", in: tempDir)
         let state = makeState(decoder: StubDecoder(failIDs: [bad1.path, bad2.path]))
         state.importFiles(urls: [bad1, bad2])
         await waitForEmpty(state)
@@ -202,9 +194,7 @@ final class AppStateTests: XCTestCase {
             .filter { RawFileIdentity.isSupported($0) && !$0.lastPathComponent.hasPrefix("bad_") }
         XCTAssertEqual(urls.count, 8)
 
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-flow-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let base = try TestFixtures.makeTempDir(name: "flow")
         defer { try? FileManager.default.removeItem(at: base) }
         let cache = ImageCacheStore(baseURL: base.appendingPathComponent("cache", isDirectory: true))
 
@@ -227,9 +217,9 @@ final class AppStateTests: XCTestCase {
     }
 
     func testPartialUnsupportedRecordsFailures() async throws {
-        let a = try makeRaw("a.cr2")
-        let b = try makeRaw("b.cr2")
-        let txt = try makeRaw("c.txt")
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let txt = try TestFixtures.makeRawFile(named: "c.txt", in: tempDir)
         let state = makeState()
         state.importFiles(urls: [a, b, txt])
         await waitForScrubbing(state)
@@ -248,9 +238,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(rawURLs.count, 8)
 
         // One real JPEG side by side with the raws.
-        let jpgURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-mixed-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: jpgURL, withIntermediateDirectories: true)
+        let jpgURL = try TestFixtures.makeTempDir(name: "mixed")
         defer { try? FileManager.default.removeItem(at: jpgURL) }
         let jpgFile = jpgURL.appendingPathComponent("sidecar.jpg")
         var bytes = [UInt8](repeating: 120, count: 32 * 32 * 3)
@@ -265,9 +253,7 @@ final class AppStateTests: XCTestCase {
         CGImageDestinationAddImage(sink, image, nil)
         XCTAssertTrue(CGImageDestinationFinalize(sink))
 
-        let cacheBase = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-mixed-cache-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: cacheBase, withIntermediateDirectories: true)
+        let cacheBase = try TestFixtures.makeTempDir(name: "mixed-cache")
         defer { try? FileManager.default.removeItem(at: cacheBase) }
 
         // Default decoder (RoutingDecoder) with a real cache.

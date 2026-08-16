@@ -10,11 +10,10 @@ final class ImageWindowTests: XCTestCase {
     private let count = 100
 
     override func setUp() async throws {
-        fixtureDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-win-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: fixtureDir, withIntermediateDirectories: true)
+        fixtureDir = try TestFixtures.makeTempDir(name: "win")
         for index in 0..<count {
-            try writeJPEG(color: UInt8(index % 256), to: url(for: index))
+            try TestFixtures.writeJPEG(color: UInt8(index % 256),
+                                       to: fixtureDir.appendingPathComponent(String(format: "%03d.jpg", index)))
         }
     }
 
@@ -22,30 +21,11 @@ final class ImageWindowTests: XCTestCase {
         try? FileManager.default.removeItem(at: fixtureDir)
     }
 
-    private func url(for index: Int) -> URL {
-        fixtureDir.appendingPathComponent(String(format: "%03d.jpg", index))
-    }
-
-    private func writeJPEG(color: UInt8, to url: URL) throws {
-        let width = 64, height = 40
-        var bytes = [UInt8](repeating: color, count: width * height * 3)
-        let data = Data(bytes)
-        let provider = CGDataProvider(data: data as CFData)!
-        let image = CGImage(width: width, height: height, bitsPerComponent: 8,
-                            bitsPerPixel: 24, bytesPerRow: width * 3,
-                            space: CGColorSpaceCreateDeviceRGB(),
-                            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                            provider: provider, decode: nil, shouldInterpolate: false,
-                            intent: .defaultIntent)!
-        let sink = CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)!
-        CGImageDestinationAddImage(sink, image, nil)
-        CGImageDestinationFinalize(sink)
-    }
-
     private func makeLoader() -> (Int) async -> CGImage? {
         { [fixtureDir = self.fixtureDir!] index in
             guard index >= 0, index < self.count else { return nil }
-            let src = CGImageSourceCreateWithURL(self.url(for: index) as CFURL, nil)!
+            let src = CGImageSourceCreateWithURL(
+                fixtureDir.appendingPathComponent(String(format: "%03d.jpg", index)) as CFURL, nil)!
             return CGImageSourceCreateImageAtIndex(src, 0, nil)
         }
     }

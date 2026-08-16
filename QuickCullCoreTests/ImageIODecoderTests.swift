@@ -8,9 +8,7 @@ final class ImageIODecoderTests: XCTestCase {
     private var fixtureDir: URL!
 
     override func setUp() async throws {
-        fixtureDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-imageio-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: fixtureDir, withIntermediateDirectories: true)
+        fixtureDir = try TestFixtures.makeTempDir(name: "imageio")
     }
 
     override func tearDown() async throws {
