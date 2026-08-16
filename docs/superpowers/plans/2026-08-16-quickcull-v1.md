@@ -26,8 +26,8 @@
 
 The spec says "the sliding window holds up to 61 decoded JPEGs in memory." A full-res CGImage for a 45 MP raw is ~135 MB, so 61 of them would need >8 GB — infeasible. Since v1 has no zoom, full-res pixels are never needed in memory (the cache on disk keeps them). Therefore:
 
-- `SlidingWindow` holds 61 **filmstrip-size renderings** (~320 px, a few MB total), loaded from the cached full-res JPEGs via ImageIO thumbnail downsampling.
-- `DisplayImageProvider` holds up to **3 display-size renderings** (current ±1), sized to 2× the screen's long edge.
+- The filmstrip window (`ImageWindow`, radius 30) holds 61 **filmstrip-size renderings** (~320 px, a few MB total), loaded from the cached full-res JPEGs via ImageIO thumbnail downsampling.
+- The display window (`ImageWindow`, radius 1) holds up to **3 display-size renderings** (current ±1), sized to 2× the screen's long edge.
 - The decoded full-res JPEGs stay on disk as the single source of truth.
 
 The window radius (±30), decode-once-before-scrub, and memory-boundedness requirements are unchanged.
@@ -59,7 +59,7 @@ quickcull/
 │   ├── Storage/ImageCacheStore.swift    # cache dir, wipe, q75 JPEG encode, keying
 │   ├── Session/Session.swift            # files, index, in-memory flags
 │   ├── Window/WindowPolicy.swift        # pure window math
-│   ├── Window/SlidingWindow.swift       # 61-thumb window (+ DisplayImageProvider)
+│   ├── Window/ImageWindow.swift          # filmstrip (r30) + display (r1) windows
 │   ├── Keys/CullKeyMap.swift            # keyCode → action (pure)
 │   ├── Engine/DecodeEngine.swift        # parallel Phase 1 decode actor
 │   ├── Commit/TrashCommit.swift         # Trashing protocol, FileManagerTrasher
@@ -1625,19 +1625,20 @@ git commit -m "feat: session model with in-memory flags"
 
 ---
 
-### Task 5: Sliding window — WindowPolicy, SlidingWindow, DisplayImageProvider
+### Task 5: Window layer — WindowPolicy, ImageWindow
 
 **Files:**
 - Create: `QuickCullCore/Window/WindowPolicy.swift`
-- Create: `QuickCullCore/Window/SlidingWindow.swift`
-- Test: `QuickCullCoreTests/WindowPolicyTests.swift`, `QuickCullCoreTests/SlidingWindowTests.swift`
+- Create: `QuickCullCore/Window/ImageWindow.swift` (one type serves both windows; the old `SlidingWindow.swift` was removed in the refactor wave)
+- Test: `QuickCullCoreTests/WindowPolicyTests.swift`, `QuickCullCoreTests/ImageWindowTests.swift`
 
 **Interfaces:**
 - Consumes: nothing (WindowPolicy); `SessionFile` not needed — windows are index-based. ImageIO for loaders.
 - Produces (used by Task 9):
   - `struct WindowPolicy { init(radius: Int = 30); func window(around: Int, count: Int) -> Range<Int>; func loadOrder(current: Int, count: Int) -> [Int]; func toEvict(resident: Set<Int>, current: Int, count: Int) -> Set<Int> }`
-  - `@MainActor final class SlidingWindow` — `init(radius: Int, count: Int, thumbnailLoader: @escaping (Int) async -> CGImage?)`, `setCurrent(_:)`, `image(at:)`, `waitUntilSettled() async`
-  - `@MainActor final class DisplayImageProvider` — `init(loader:)`, `setCurrent(_:)`, `image(at:)`, `waitUntilSettled() async`
+  - `@MainActor @Observable final class ImageWindow` — `init(radius: Int, count: Int, loader: @escaping (Int) async -> CGImage?)`, `setCurrent(_ index: Int)`, `image(at index: Int) -> CGImage?`, `waitUntilSettled(timeout: TimeInterval? = nil) async`, `images: [Int: CGImage]`
+  - `ImageWindow.thumbnails(files:cache:)` — radius 30, maxPixel 320 (filmstrip)
+  - `ImageWindow.display(files:cache:)` — radius 1, maxPixel = 2× screen long edge (main viewer)
 
 - [ ] **Step 1: Write the failing policy tests**
 
@@ -1683,24 +1684,24 @@ final class WindowPolicyTests: XCTestCase {
 
 - [ ] **Step 2: Write the failing window tests** (synthetic JPEG fixtures, generated in `setUp`)
 
-`QuickCullCoreTests/SlidingWindowTests.swift`:
+`QuickCullCoreTests/ImageWindowTests.swift`:
 ```swift
 import CoreGraphics
 import ImageIO
+import Observation
 import XCTest
 @testable import QuickCullCore
 
 @MainActor
-final class SlidingWindowTests: XCTestCase {
+final class ImageWindowTests: XCTestCase {
     private var fixtureDir: URL!
     private let count = 100
 
     override func setUp() async throws {
-        fixtureDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("qc-win-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: fixtureDir, withIntermediateDirectories: true)
+        fixtureDir = try TestFixtures.makeTempDir(name: "win")
         for index in 0..<count {
-            try writeJPEG(color: UInt8(index % 256), to: url(for: index))
+            try TestFixtures.writeJPEG(color: UInt8(index % 256),
+                                       to: fixtureDir.appendingPathComponent(String(format: "%03d.jpg", index)))
         }
     }
 
@@ -1708,46 +1709,27 @@ final class SlidingWindowTests: XCTestCase {
         try? FileManager.default.removeItem(at: fixtureDir)
     }
 
-    private func url(for index: Int) -> URL {
-        fixtureDir.appendingPathComponent(String(format: "%03d.jpg", index))
-    }
-
-    private func writeJPEG(color: UInt8, to url: URL) throws {
-        let width = 64, height = 40
-        var bytes = [UInt8](repeating: color, count: width * height * 3)
-        let data = Data(bytes)
-        let provider = CGDataProvider(data: data as CFData)!
-        let image = CGImage(width: width, height: height, bitsPerComponent: 8,
-                            bitsPerPixel: 24, bytesPerRow: width * 3,
-                            space: CGColorSpaceCreateDeviceRGB(),
-                            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                            provider: provider, decode: nil, shouldInterpolate: false,
-                            intent: .defaultIntent)!
-        let sink = CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)!
-        CGImageDestinationAddImage(sink, image, nil)
-        CGImageDestinationFinalize(sink)
-    }
-
     private func makeLoader() -> (Int) async -> CGImage? {
         { [fixtureDir = self.fixtureDir!] index in
             guard index >= 0, index < self.count else { return nil }
-            let src = CGImageSourceCreateWithURL(self.url(for: index) as CFURL, nil)!
+            let src = CGImageSourceCreateWithURL(
+                fixtureDir.appendingPathComponent(String(format: "%03d.jpg", index)) as CFURL, nil)!
             return CGImageSourceCreateImageAtIndex(src, 0, nil)
         }
     }
 
     func testWindowNeverExceedsRadiusPlusOne() async {
-        let window = SlidingWindow(radius: 30, count: count, thumbnailLoader: makeLoader())
+        let window = ImageWindow(radius: 30, count: count, loader: makeLoader())
         for index in [0, 5, 50, 95, 99, 50, 0] {
             window.setCurrent(index)
             await window.waitUntilSettled()
-            XCTAssertLessThanOrEqual(window.thumbnails.count, 61)
+            XCTAssertLessThanOrEqual(window.images.count, 61)
         }
     }
 
     func testCurrentImageLoadedFirst() async {
         var seen: [Int] = []
-        let window = SlidingWindow(radius: 30, count: count) { index in
+        let window = ImageWindow(radius: 30, count: count) { index in
             seen.append(index)
             return nil
         }
@@ -1757,7 +1739,7 @@ final class SlidingWindowTests: XCTestCase {
     }
 
     func testEvictionDropsFarEdges() async {
-        let window = SlidingWindow(radius: 2, count: count, thumbnailLoader: makeLoader())
+        let window = ImageWindow(radius: 2, count: count, loader: makeLoader())
         window.setCurrent(50)
         await window.waitUntilSettled()
         window.setCurrent(99)
@@ -1766,28 +1748,56 @@ final class SlidingWindowTests: XCTestCase {
         XCTAssertNotNil(window.image(at: 97))
     }
 
-    func testDisplayProviderKeepsAtMostThree() async {
-        let provider = DisplayImageProvider(loader: makeLoader())
+    func testDisplayRadiusKeepsAtMostThree() async {
+        let window = ImageWindow(radius: 1, count: count, loader: makeLoader())
         for index in [0, 1, 2, 3, 10, 99] {
-            provider.setCurrent(index)
-            await provider.waitUntilSettled()
-            XCTAssertLessThanOrEqual(provider.images.count, 3)
+            window.setCurrent(index)
+            await window.waitUntilSettled()
+            XCTAssertLessThanOrEqual(window.images.count, 3)
         }
-        provider.setCurrent(50)
-        await provider.waitUntilSettled()
-        XCTAssertNotNil(provider.image(at: 50))
-        XCTAssertNotNil(provider.image(at: 49))
-        XCTAssertNotNil(provider.image(at: 51))
-        XCTAssertNil(provider.image(at: 48))
+        window.setCurrent(50)
+        await window.waitUntilSettled()
+        XCTAssertNotNil(window.image(at: 50))
+        XCTAssertNotNil(window.image(at: 49))
+        XCTAssertNotNil(window.image(at: 51))
+        XCTAssertNil(window.image(at: 48))
+    }
+
+    func testImagePopulationIsObservable() async {
+        let window = ImageWindow(radius: 30, count: count, loader: makeLoader())
+        var fired = false
+        withObservationTracking {
+            _ = window.image(at: 0)
+        } onChange: {
+            fired = true
+        }
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+        for _ in 0..<10 where !fired {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(fired, "image population must fire observation")
+    }
+
+    func testWaitUntilSettledHonorsTimeout() async {
+        let window = ImageWindow(radius: 30, count: 3) { _ in
+            try? await Task.sleep(nanoseconds: 500_000_000)  // slow loader
+            return nil
+        }
+        window.setCurrent(0)
+        let start = Date()
+        await window.waitUntilSettled(timeout: 0.05)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.4,
+                          "timeout must return before the slow loader finishes")
     }
 }
 ```
 
 - [ ] **Step 3: Run tests to verify they fail**
 
-Expected: BUILD FAILED with "cannot find 'WindowPolicy' in scope".
+Expected: BUILD FAILED with "cannot find 'ImageWindow' in scope".
 
-- [ ] **Step 4: Implement the three types**
+- [ ] **Step 4: Implement the two types**
 
 `QuickCullCore/Window/WindowPolicy.swift`:
 ```swift
@@ -1833,110 +1843,110 @@ public struct WindowPolicy {
 }
 ```
 
-`QuickCullCore/Window/SlidingWindow.swift`:
+`QuickCullCore/Window/ImageWindow.swift`:
 ```swift
+import AppKit
 import CoreGraphics
 import Foundation
+import ImageIO
 import Observation
 
-/// Holds the filmstrip window: at most 2*radius+1 (61) thumbnail renderings,
-/// loaded from the cached full-res JPEGs. Loads current-first, then outward;
-/// evicts everything outside the window immediately. @Observable so the UI
-/// re-renders when async loads populate the thumbnails.
+/// Bounded in-memory window of rendered images keyed by position: current ±
+/// radius, loaded current-first by an async loader. @Observable so the UI
+/// re-renders when async loads populate `images`. One type serves both the
+/// filmstrip (radius 30, thumbnails) and the main viewer (radius 1, display
+/// size).
 @MainActor
 @Observable
-public final class SlidingWindow {
+public final class ImageWindow {
     public let radius: Int
     public let count: Int
-    public private(set) var thumbnails: [Int: CGImage] = [:]
+    public private(set) var images: [Int: CGImage] = [:]
 
-    private let thumbnailLoader: (Int) async -> CGImage?
+    private let loader: (Int) async -> CGImage?
     private var inFlight: Set<Int> = []
     private var currentIndex: Int = 0
 
-    public init(radius: Int, count: Int, thumbnailLoader: @escaping (Int) async -> CGImage?) {
+    public init(radius: Int, count: Int, loader: @escaping (Int) async -> CGImage?) {
         self.radius = radius
         self.count = count
-        self.thumbnailLoader = thumbnailLoader
+        self.loader = loader
     }
 
     public func setCurrent(_ index: Int) {
         currentIndex = min(max(index, 0), max(count - 1, 0))
         let policy = WindowPolicy(radius: radius)
 
-        let evict = policy.toEvict(resident: Set(thumbnails.keys),
-                                   current: currentIndex, count: count)
-        for i in evict {
-            thumbnails.removeValue(forKey: i)
+        // Materialize the key set: mutating `images` while iterating its
+        // keys is technically undefined.
+        for i in Set(images.keys) where !policy.window(around: currentIndex, count: count).contains(i) {
+            images.removeValue(forKey: i)
             inFlight.remove(i)
         }
 
         for i in policy.loadOrder(current: currentIndex, count: count)
-        where thumbnails[i] == nil && !inFlight.contains(i) {
-            inFlight.insert(i)
-            Task { [weak self] in
-                let image = await thumbnailLoader(i)
-                guard let self else { return }
-                self.inFlight.remove(i)
-                guard policy.window(around: self.currentIndex, count: self.count).contains(i) else { return }
-                if let image { self.thumbnails[i] = image }
-            }
-        }
-        assert(thumbnails.count <= 2 * radius + 1, "filmstrip window invariant violated")
-    }
-
-    public func image(at index: Int) -> CGImage? { thumbnails[index] }
-
-    /// Awaits until all in-flight loads settle (used by tests).
-    public func waitUntilSettled() async {
-        while !inFlight.isEmpty {
-            try? await Task.sleep(nanoseconds: 5_000_000)
-        }
-    }
-}
-
-/// Holds the main-view display renderings: current ±1 (max 3 images),
-/// sized by the loader (2× screen long edge in production). @Observable so
-/// the UI re-renders when async loads populate the images.
-@MainActor
-@Observable
-public final class DisplayImageProvider {
-    public private(set) var images: [Int: CGImage] = [:]
-
-    private let loader: (Int) async -> CGImage?
-    private var currentIndex: Int = 0
-    private var inFlight: Set<Int> = []
-
-    public init(loader: @escaping (Int) async -> CGImage?) {
-        self.loader = loader
-    }
-
-    public func setCurrent(_ index: Int) {
-        currentIndex = index
-        let desired = Set([index - 1, index, index + 1])
-        for i in images.keys where !desired.contains(i) {
-            images.removeValue(forKey: i)
-            inFlight.remove(i)
-        }
-        for i in desired.sorted() where images[i] == nil && !inFlight.contains(i) {
+        where images[i] == nil && !inFlight.contains(i) {
             inFlight.insert(i)
             Task { [weak self] in
                 let image = await loader(i)
                 guard let self else { return }
                 self.inFlight.remove(i)
-                guard Set([self.currentIndex - 1, self.currentIndex, self.currentIndex + 1]).contains(i) else { return }
+                guard policy.window(around: self.currentIndex, count: self.count).contains(i) else { return }
                 if let image { self.images[i] = image }
             }
         }
-        assert(images.count <= 3, "display window invariant violated")
+        assert(images.count <= 2 * radius + 1, "window invariant violated")
     }
 
     public func image(at index: Int) -> CGImage? { images[index] }
 
-    public func waitUntilSettled() async {
+    /// Awaits until all in-flight loads settle, the optional timeout
+    /// expires, or the caller is cancelled (used by tests).
+    public func waitUntilSettled(timeout: TimeInterval? = nil) async {
+        let deadline = timeout.map { Date().addingTimeInterval($0) }
         while !inFlight.isEmpty {
-            try? await Task.sleep(nanoseconds: 5_000_000)
+            if let deadline, Date() >= deadline { return }
+            do { try await Task.sleep(nanoseconds: 5_000_000) }
+            catch { return }   // cancelled: stop waiting
         }
+    }
+
+    // MARK: App factories
+
+    /// Filmstrip window: radius 30, 320 px thumbnails.
+    public static func thumbnails(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
+        ImageWindow(radius: 30, count: files.count) { [cache] index in
+            guard index >= 0, index < files.count else { return nil }
+            return loadJPEG(at: try? await cache.cacheURL(for: files[index]),
+                            maxPixelSize: 320)
+        }
+    }
+
+    /// Main-viewer window: radius 1, display size (2× screen long edge).
+    public static func display(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
+        let pixels = displayPixelLimit()
+        return ImageWindow(radius: 1, count: files.count) { [cache] index in
+            guard index >= 0, index < files.count else { return nil }
+            return loadJPEG(at: try? await cache.cacheURL(for: files[index]),
+                            maxPixelSize: pixels)
+        }
+    }
+
+    private static func displayPixelLimit() -> Int {
+        Int(max(NSScreen.main?.frame.width ?? 1920,
+                NSScreen.main?.frame.height ?? 1080) * 2)
+    }
+
+    /// Downsamples a cached JPEG (thumbnail API = memory-bounded).
+    private static func loadJPEG(at url: URL?, maxPixelSize: Int) -> CGImage? {
+        guard let url,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
 ```
@@ -2054,7 +2064,7 @@ git commit -m "feat: keyboard mapping for scrub controls"
 - Consumes: `RawDecoding` + `RawBitmap`/`DecodeError` (Task 2), `ImageCacheStore` (Task 3), `SessionFile` (Task 2).
 - Produces (used by Task 9):
   - `struct DecodeOutcome: Equatable { let file: SessionFile; let error: DecodeError? }`
-  - `actor DecodeEngine { init(decoder: RawDecoding, cache: ImageCacheStore); enum Event { case progress(completed: Int, total: Int); case completed([DecodeOutcome]) }; func decodeAll(files: [SessionFile]) -> AsyncStream<Event> }`
+  - `actor DecodeEngine { init(decoder: RawDecoding, cache: ImageCacheStore, workerLimit: Int? = nil); static func workerCount(activeProcessors: Int, physicalMemoryBytes: UInt64, limit: Int?) -> Int; enum Event { case progress(completed: Int, total: Int); case completed([DecodeOutcome]) }; func decodeAll(files: [SessionFile]) -> AsyncStream<Event> }`
 
 - [ ] **Step 1: Write the failing tests** (stub decoder — no real raws needed; plus one integration test with the real decoder + fixtures)
 
@@ -2233,7 +2243,8 @@ public struct DecodeOutcome: Equatable {
 }
 
 /// Phase 1: decode every file to a cached full-res q75 JPEG in parallel,
-/// bounded by the number of performance cores. Emits progress events, then
+/// bounded by the memory-aware worker rule (one worker per 2 GB of RAM,
+/// capped by core count). Emits strictly monotonic progress events, then
 /// exactly one completed event with per-file outcomes.
 public actor DecodeEngine {
     public enum Event {
@@ -2243,16 +2254,34 @@ public actor DecodeEngine {
 
     private let decoder: RawDecoding
     private let cache: ImageCacheStore
+    private let workerCount: Int
 
-    public init(decoder: RawDecoding, cache: ImageCacheStore) {
+    public init(decoder: RawDecoding, cache: ImageCacheStore, workerLimit: Int? = nil) {
         self.decoder = decoder
         self.cache = cache
+        self.workerCount = Self.workerCount(
+            activeProcessors: ProcessInfo.processInfo.activeProcessorCount,
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+            limit: workerLimit)
+    }
+
+    /// Memory-bounded worker rule: one worker per 2 GB of physical RAM
+    /// (LibRaw unpack + demosaic + mem image + JPEG encode for a 45 MP raw
+    /// needs ≈512 MB transient per worker), capped by core count; explicit
+    /// limits are floor-1.
+    public static func workerCount(activeProcessors: Int,
+                                   physicalMemoryBytes: UInt64,
+                                   limit: Int?) -> Int {
+        if let limit {
+            return max(1, limit)
+        }
+        let byMemory = max(1, Int(physicalMemoryBytes / (2 * 1024 * 1024 * 1024)))
+        return min(max(1, activeProcessors), byMemory)
     }
 
     public func decodeAll(files: [SessionFile]) -> AsyncStream<Event> {
         AsyncStream { continuation in
             let task = Task {
-                let workerCount = max(1, ProcessInfo.processInfo.activeProcessorCount)
                 let queue = JobQueue<SessionFile>()
                 for file in files { await queue.enqueue(file) }
 
@@ -2264,6 +2293,7 @@ public actor DecodeEngine {
                     for _ in 0..<workerCount {
                         group.addTask {
                             while let file = await queue.dequeue() {
+                                if Task.isCancelled { break }
                                 let outcome: DecodeOutcome
                                 do {
                                     let bitmap = try self.decoder.decodeRaw(at: file.url)
@@ -2303,7 +2333,7 @@ actor JobQueue<Element> {
 }
 
 /// Serializes progress delivery: increments and yields inside one actor
-/// isolation, so there is no preemption window between the two — delivered
+/// isolation, so there is no preemption window between the two. Delivered
 /// `completed:` values are strictly monotonic by construction, not by
 /// scheduling accident.
 actor ProgressReporter {
@@ -2513,9 +2543,9 @@ git commit -m "feat: trash commit with per-file outcomes"
 **Interfaces:**
 - Consumes: everything from Tasks 2-8.
 - Produces: the complete user flow. `AppState` API:
-  - `@MainActor @Observable final class AppState` — `init(decoder: RawDecoding = LibRawDecoder(), cache: ImageCacheStore = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()), trasher: Trashing = FileManagerTrasher())`
-  - `phase: AppPhase` (`empty` / `decoding(completed: Int, total: Int)` / `scrubbing`), `session: Session?`, `importFailures: [DecodeOutcome]`, `commitFailures: [TrashOutcome]`, `pendingCommitCount: Int`
-  - `prepareForLaunch()`, `importFiles(urls: [URL])`, `handle(_ action: CullAction)`, `setCurrentIndex(_:)`, `requestCommit()`, `confirmCommit()`, `cancelCommit()`, `thumbWindow: SlidingWindow?`, `displayImages: DisplayImageProvider?`
+  - `@MainActor @Observable final class AppState` — `init(decoder: RawDecoding = RoutingDecoder(librawDecoder: LibRawDecoder(), imageIODecoder: ImageIODecoder()), cache: ImageCacheStore = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()), trasher: Trashing = FileManagerTrasher())`
+  - `phase: AppPhase` (`empty` / `decoding(completed: Int, total: Int)` / `scrubbing`), `session: Session?`, `importFailures: [DecodeOutcome]`, `commitFailures: [TrashOutcome]`, `pendingCommitCount: Int`, `isCommitting: Bool`
+  - `prepareForLaunch()`, `importFiles(urls: [URL])`, `handle(_ action: CullAction)`, `setCurrentIndex(_:)`, `requestCommit()`, `confirmCommit() async`, `cancelCommit()`, `thumbWindow: ImageWindow?`, `displayImages: ImageWindow?`
 
 - [ ] **Step 1: Write the failing AppState tests** (inject stub decoder + stub trasher; no UI)
 
@@ -2700,9 +2730,10 @@ public final class AppState {
     public private(set) var importFailures: [DecodeOutcome] = []
     public private(set) var commitFailures: [TrashOutcome] = []
     public private(set) var pendingCommitCount: Int = 0
+    public private(set) var isCommitting: Bool = false
 
-    public private(set) var thumbWindow: SlidingWindow?
-    public private(set) var displayImages: DisplayImageProvider?
+    public private(set) var thumbWindow: ImageWindow?
+    public private(set) var displayImages: ImageWindow?
 
     public let cache: ImageCacheStore
     private let decoder: RawDecoding
@@ -2727,8 +2758,6 @@ public final class AppState {
     public func importFiles(urls: [URL]) {
         let unique = Array(Set(urls.map(\.standardizedFileURL))).sorted { $0.path < $1.path }
         let supported = unique.filter(RawFileIdentity.isSupported)
-        guard !supported.isEmpty else { return }
-
         guard !supported.isEmpty else {
             // Nothing importable: surface the unsupported selection in the
             // empty-state banner instead of silently ignoring it.
@@ -2775,8 +2804,10 @@ public final class AppState {
                         thumbWindow = nil
                         displayImages = nil
                         phase = .empty
-                    } else if let remaining = session {
-                        finishDecoding(files: remaining.files)
+                    } else if let session {
+                        // Loaders index into the files array, so it must be
+                        // the post-removal list.
+                        finishDecoding(files: session.files)
                     }
                 }
             }
@@ -2784,29 +2815,21 @@ public final class AppState {
     }
 
     private func finishDecoding(files: [SessionFile]) {
-        guard let session else { return }
-        thumbWindow = SlidingWindow(radius: 30, count: session.count,
-                                    thumbnailLoader: makeThumbLoader(files: files))
-        displayImages = DisplayImageProvider(loader: makeDisplayLoader(files: files))
-        syncWindows()
+        installWindows(for: files)
         phase = .scrubbing
     }
 
-    private func makeThumbLoader(files: [SessionFile]) -> (Int) async -> CGImage? {
-        { [cache] index in
-            guard index >= 0, index < files.count else { return nil }
-            return Self.loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                                 maxPixelSize: 320)
-        }
+    private func installWindows(for files: [SessionFile]) {
+        thumbWindow = ImageWindow.thumbnails(files: files, cache: cache)
+        displayImages = ImageWindow.display(files: files, cache: cache)
+        syncWindows()
     }
 
-    private func makeDisplayLoader(files: [SessionFile]) -> (Int) async -> CGImage? {
-        let pixels = Self.displayPixelLimit()
-        return { [cache] index in
-            guard index >= 0, index < files.count else { return nil }
-            return Self.loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                                 maxPixelSize: pixels)
-        }
+    /// Dismisses the import-failure banner once the user has seen it.
+    /// Failures persist past the decoding → scrubbing transition so the
+    /// scrub phase can surface them.
+    public func dismissImportFailures() {
+        importFailures = []
     }
 
     public func handle(_ action: CullAction) {
@@ -2837,61 +2860,30 @@ public final class AppState {
         pendingCommitCount = session?.flaggedCount ?? 0
     }
 
-    public func confirmCommit() {
-        guard let session else { return }
+    public func confirmCommit() async {
+        guard let session, !isCommitting else { return }
         let flagged = session.flaggedFiles
-        let outcomes = TrashCommit(trasher: trasher).commit(files: flagged)
+        isCommitting = true
+        let outcomes = await Task.detached(priority: .userInitiated) {
+            TrashCommit(trasher: self.trasher).commit(files: flagged)
+        }.value
         let succeeded = outcomes.filter(\.succeeded).map(\.file)
         session.remove(succeeded)
         commitFailures = outcomes.filter { !$0.succeeded }
         pendingCommitCount = 0
+        isCommitting = false
         if session.isEmpty {
-            // Nothing left to scrub: back to the empty state for a new import.
             self.session = nil
             thumbWindow = nil
             displayImages = nil
             phase = .empty
         } else {
-            rebuildWindows()
+            installWindows(for: session.files)
         }
     }
 
     public func cancelCommit() {
         pendingCommitCount = 0
-    }
-
-    /// Failures persist past the decoding → scrubbing transition so the
-    /// scrub phase can surface them; this clears them.
-    public func dismissImportFailures() {
-        importFailures = []
-    }
-
-    private func rebuildWindows() {
-        thumbWindow = nil
-        displayImages = nil
-        if let session, !session.isEmpty {
-            thumbWindow = SlidingWindow(radius: 30, count: session.count,
-                                        thumbnailLoader: makeThumbLoader(files: session.files))
-            displayImages = DisplayImageProvider(loader: makeDisplayLoader(files: session.files))
-            syncWindows()
-        }
-    }
-
-    private static func displayPixelLimit() -> Int {
-        Int(max(NSScreen.main?.frame.width ?? 1920,
-                NSScreen.main?.frame.height ?? 1080) * 2)
-    }
-
-    /// Downsamples a cached JPEG (thumbnail API = memory-bounded).
-    static func loadJPEG(at url: URL?, maxPixelSize: Int) -> CGImage? {
-        guard let url,
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
 ```

@@ -1,7 +1,7 @@
 # QuickCull — Refactor Wave 1: Consolidation & Hardening
 
 Date: 2026-08-16
-Status: approved design (pre-plan)
+Status: **implemented** (2026-08-16 — all four workstreams shipped; suite 69 green)
 
 ## Purpose
 
@@ -44,7 +44,12 @@ Behavioral deltas folded in (from the parked final-review items):
 
 - **waitUntilSettled**: track load `Task`s and await them instead of the
   5 ms busy-poll; accept an optional `timeout` (nil = wait forever). The
-  current infinite-loop-on-cancellation hazard disappears with it.
+  current infinite-loop-on-cancellation hazard disappears with it. Shipped
+  refinement (Task 1): the poll loop is kept (bounded 5 ms sleeps) with a
+  deadline check and cancellation-safe sleep — a tracked-task list was
+  considered but grows unboundedly across `setCurrent` calls; poll +
+  deadline + cancel-on-error delivers the same contract with no
+  accumulation.
 - **Eviction mutation-during-iteration**: iterate a materialized
   `Set(images.keys)` before removing (the technically-UB-but-safe pattern
   becomes plainly safe).
@@ -89,8 +94,9 @@ One `QuickCullCoreTests/TestFixtures.swift` owning the copy-pasted helpers:
 - `makeTempDir()`, `makeRawFile(named:)`, `makeFiles(names:)`,
   `writeJPEG(color:to:)`, `makeCGImage(width:height:)`, `makeTempCache()`.
 
-Six test files stop redefining them. Same assertions, same test count (plus
-new tests for the worker limit and any new API).
+Seven test files stop redefining them (the Task 6 follow-up folded in
+`SessionTests`' last copy). Same assertions, same test count (plus new tests
+for the worker limit and any new API).
 
 ## Sequencing
 

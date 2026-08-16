@@ -4,12 +4,8 @@ import XCTest
 
 @MainActor
 final class SessionTests: XCTestCase {
-    private func makeFiles(_ names: [String]) -> [SessionFile] {
-        names.map { SessionFile(url: URL(fileURLWithPath: "/tmp/shoot/\($0)")) }
-    }
-
     func testMoveClampsAtEdges() {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
         session.move(by: 10)
         XCTAssertEqual(session.currentIndex, 2)
         session.move(by: -10)
@@ -17,7 +13,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testToggleFlagOnAndOff() {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
         session.toggleFlag()
         XCTAssertEqual(session.flaggedCount, 1)
         XCTAssertTrue(session.isFlagged(session.currentFile))
@@ -26,7 +22,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testFlagsKeyedByIdSurviveIndexChange() {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
         session.toggleFlag()          // flags index 0
         session.move(by: 1)
         session.toggleFlag()          // flags index 1
@@ -36,7 +32,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testRemoveTrashedFilesClearsFlagsAndClampsIndex() {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"]))
         session.setIndex(3)
         session.remove([session.files[3]])
         XCTAssertEqual(session.count, 3)
@@ -45,13 +41,13 @@ final class SessionTests: XCTestCase {
     }
 
     func testRemoveAllLeavesEmptySession() {
-        let session = Session(files: makeFiles(["a.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2"]))
         session.remove([session.files[0]])
         XCTAssertTrue(session.isEmpty)
     }
 
     func testRemoveBeforeCurrentShiftsIndex() {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"]))
         session.setIndex(2)   // current = c
         session.remove([session.files[0], session.files[3]])   // remove a and d
         XCTAssertEqual(session.count, 2)
@@ -60,7 +56,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testRemoveBeforeCurrentKeepsPosition() {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
         session.setIndex(1)   // current = b
         session.remove([session.files[0]])   // remove a
         XCTAssertEqual(session.count, 2)
@@ -69,7 +65,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testFlaggedFilesReturnsInOrder() {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
         session.toggleFlag()
         session.move(by: 1)
         session.toggleFlag()
@@ -78,7 +74,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testCurrentIndexChangeIsObservable() async {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
         var fired = false
         withObservationTracking {
             _ = session.currentIndex
@@ -94,7 +90,7 @@ final class SessionTests: XCTestCase {
     }
 
     func testFlagChangesAreObservable() async {
-        let session = Session(files: makeFiles(["a.cr2", "b.cr2"]))
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
         var fired = false
         withObservationTracking {
             _ = session.isFlagged(session.files[0])
