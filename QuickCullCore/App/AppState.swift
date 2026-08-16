@@ -113,7 +113,7 @@ public final class AppState {
 
     /// Dismisses the import-failure banner once the user has seen it.
     /// Failures persist past the decoding → scrubbing transition so the
-    /// scrub phase can surface them; this clears them.
+    /// scrub phase can surface them.
     public func dismissImportFailures() {
         importFailures = []
     }

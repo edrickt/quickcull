@@ -17,7 +17,7 @@ struct QuickCullApp: App {
                     m.start(appState: appState)
                     monitor = m
                     // Best-effort cache wipe on normal quit. Not guaranteed
-                    // (force-quit skips it) — the launch wipe is authoritative.
+                    // (force-quit skips it). The launch wipe is authoritative.
                     NotificationCenter.default.addObserver(
                         forName: NSApplication.willTerminateNotification,
                         object: nil, queue: .main) { _ in

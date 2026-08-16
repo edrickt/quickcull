@@ -4,8 +4,8 @@ import ImageIO
 
 /// Decodes common image formats (JPEG, PNG, HEIC/HEIF) via ImageIO at full
 /// resolution. EXIF orientation is baked into the pixels, so the cache's
-/// JPEGs and the scrub view both show upright images (mirroring how LibRaw
-/// output is already rotated).
+/// JPEGs and the scrub view both show upright images (LibRaw output is
+/// already rotated the same way).
 public final class ImageIODecoder: RawDecoding {
 
     public init() {}

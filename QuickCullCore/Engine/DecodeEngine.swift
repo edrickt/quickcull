@@ -81,7 +81,7 @@ actor JobQueue<Element> {
 }
 
 /// Serializes progress delivery: increments and yields inside one actor
-/// isolation, so there is no preemption window between the two — delivered
+/// isolation, so there is no preemption window between the two. Delivered
 /// `completed:` values are strictly monotonic by construction, not by
 /// scheduling accident.
 actor ProgressReporter {

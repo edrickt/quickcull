@@ -70,7 +70,7 @@ boundary.
 3. **`ImageCacheStore`**
    - Owns `~/Library/Application Support/QuickCull/cache/`.
    - Launch: delete the cache directory and recreate it (authoritative,
-     idempotent — covers crash/force-quit leftovers).
+     idempotent, covers crash/force-quit leftovers).
    - Quit: best-effort delete; failure is harmless.
    - Writes decoded JPEGs keyed by source file identity: path + size + mtime.
    - Scrubbing reads only from the cache.
@@ -140,7 +140,7 @@ Quit
 - **Decoder crash risk** (inherent to in-process LibRaw): mitigated by
   extension/header sniffing before decode and full use of LibRaw's error
   paths. Decode happens only in Phase 1, so a crash costs nothing but a
-  restart — the cache is rebuilt on next launch. If pathological files become
+  restart. The cache is rebuilt on next launch. If pathological files become
   a real-world problem, the `RawDecoder` boundary allows moving decode to an
   XPC service without touching other components.
 - **Disk full during Phase 1**: queue halts; error state reports space needed;

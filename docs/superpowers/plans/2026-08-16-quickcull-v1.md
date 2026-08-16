@@ -4,7 +4,7 @@
 
 **Goal:** Build QuickCull v1 — a native macOS (14+) SwiftUI app that decodes multi-selected raw files from all major camera brands to full-resolution q75 JPEGs, then lets the photographer scrub with arrow keys and flag rejects with Z for a Trash commit.
 
-**Architecture:** Three targets in one Xcode project. `QuickCullCore` (framework) holds all logic — LibRaw decode wrapper, JPEG cache store, session state, sliding window, decode engine, trash commit, app state — with protocols at every boundary so each unit is independently testable. `QuickCull` (app) is a thin SwiftUI layer (views + keyboard monitor). `QuickCullCoreTests` is a logic test bundle (no host app) that runs via `xcrun xctest` directly. LibRaw 0.22.1 is built once by a vendoring script into `Build/libraw/libraw.dylib` (universal), dynamically linked and embedded inside the framework bundle for LGPL compliance.
+**Architecture:** Three targets in one Xcode project. `QuickCullCore` (framework) holds all logic (LibRaw decode wrapper, JPEG cache store, session state, sliding window, decode engine, trash commit, app state) with protocols at every boundary so each unit is independently testable. `QuickCull` (app) is a thin SwiftUI layer (views + keyboard monitor). `QuickCullCoreTests` is a logic test bundle (no host app) that runs via `xcrun xctest` directly. LibRaw 0.22.1 is built once by a vendoring script into `Build/libraw/libraw.dylib` (universal), dynamically linked and embedded inside the framework bundle for LGPL compliance.
 
 **Tech Stack:** Swift 5 language mode on Xcode 26 toolchain (Swift 6.2), SwiftUI + Observation (macOS 14), LibRaw 0.22.1 (C API, no libjpeg — JPEG encoding via ImageIO), XCTest.
 
@@ -929,7 +929,7 @@ fetch "https://raw.githubusercontent.com/exiftool/exiftool/master/t/images/Phase
 echo "All fixtures fetched."
 ```
 
-Note: fixture files are ~100 MB total and are committed to the repo (they are test resources). Xcode 26's synchronized-folder resource sync FLATTENS subfolder structure, so a "Copy Test Fixtures" script phase on the tests target (phase `C10000000000000000000008`, running `Scripts/copy-test-fixtures.sh`, created in this task) installs the structured `Fixtures/` tree into the test bundle — tests reach files via `Bundle(for:)` + `subdirectory: "Fixtures/raws"`. The DNG fixture doubles as Leica coverage (Leica raws are DNG).
+Note: fixture files are ~100 MB total and are committed to the repo (they are test resources). Xcode 26's synchronized-folder resource sync FLATTENS subfolder structure, so a "Copy Test Fixtures" script phase on the tests target (phase `C10000000000000000000008`, running `Scripts/copy-test-fixtures.sh`, created in this task) installs the structured `Fixtures/` tree into the test bundle. Tests reach files via `Bundle(for:)` + `subdirectory: "Fixtures/raws"`. The DNG fixture doubles as Leica coverage (Leica raws are DNG).
 
 - [ ] **Step 2: Run it and verify checksums pass**
 
@@ -2340,7 +2340,7 @@ final class AtomicOutcomeAccumulator: @unchecked Sendable {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Note: `testRealDecoderIntegrationWithFixtures` decodes 8 real raws (~130 MP total) — expect 10-60 s.
+Note: `testRealDecoderIntegrationWithFixtures` decodes 8 real raws (~130 MP total). Expect 10-60 s.
 
 Expected: `Executed 36 tests, with 0 failures`.
 

@@ -45,7 +45,7 @@ struct ScrubView: View {
     }
 
     /// Import failures are set before the decoding → scrubbing transition,
-    /// so they are surfaced here (DecodingView can never render them).
+    /// so they appear here (DecodingView can never render them).
     private var importFailuresBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")

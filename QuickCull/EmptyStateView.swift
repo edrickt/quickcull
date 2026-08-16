@@ -35,7 +35,7 @@ struct EmptyStateView: View {
         }
     }
 
-    /// Same dismissible banner as ScrubView: surfaces failed decodes (and
+    /// Same dismissible banner as ScrubView: shows failed decodes (and
     /// all-unsupported imports) from the empty state.
     private var importFailuresBanner: some View {
         HStack(spacing: 8) {

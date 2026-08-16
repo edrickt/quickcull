@@ -1,7 +1,7 @@
 import AppKit
 import QuickCullCore
 
-/// App-wide key handling via a local event monitor (no focus requirements —
+/// App-wide key handling via a local event monitor (no focus requirements:
 /// scrubbing must work the moment the window is up).
 final class KeyboardMonitor {
     private var token: Any?
