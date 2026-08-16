@@ -4,7 +4,7 @@
 
 **Goal:** Behavior-preserving consolidation and hardening of QuickCull: unify the two duplicated window classes into one `ImageWindow`, slim `AppState`, fix the parked robustness items (atomic cache replace, commit off the main actor, cancellation-safe waits, cooperative engine cancellation), bound decode workers by memory, and consolidate duplicated test helpers.
 
-**Architecture:** One new core type (`ImageWindow`) replaces `SlidingWindow` + `DisplayImageProvider` with identical invariants; `AppState` keeps its public property names so all views are untouched. `TrashCommit` moves off the main actor via a `Sendable` `Trashing` protocol. `DecodeEngine` gains an injectable worker limit (auto rule: `min(cores, physicalMemory / 512MB)`) and cooperative cancellation.
+**Architecture:** One new core type (`ImageWindow`) replaces `SlidingWindow` + `DisplayImageProvider` with identical invariants; `AppState` keeps its public property names so all views are untouched. `TrashCommit` moves off the main actor via a `Sendable` `Trashing` protocol. `DecodeEngine` gains an injectable worker limit (auto rule: `min(cores, physicalMemory / 2GB)`) and cooperative cancellation.
 
 **Tech Stack:** Swift 5 language mode on Xcode 26, SwiftUI + Observation (macOS 14), XCTest. No new dependencies.
 
@@ -504,7 +504,7 @@ git commit -m "refactor: trash commit runs off the main actor"
 
 **Interfaces:**
 - `DecodeEngine.init(decoder: RawDecoding, cache: ImageCacheStore, workerLimit: Int? = nil)`
-- `DecodeEngine.workerCount(activeProcessors: Int, physicalMemoryBytes: UInt64, limit: Int?) -> Int` (static, pure — the auto rule `min(cores, max(1, bytes / 512MB))` with explicit limit `max(1, limit)`)
+- `DecodeEngine.workerCount(activeProcessors: Int, physicalMemoryBytes: UInt64, limit: Int?) -> Int` (static, pure — the auto rule `min(cores, max(1, bytes / 2GB))` with explicit limit `max(1, limit)`)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -562,7 +562,7 @@ In `DecodeEngine`:
             limit: workerLimit)
     }
 
-    /// Memory-bounded worker rule: one worker per 512 MB of physical RAM
+    /// Memory-bounded worker rule: one worker per 2 GB of physical RAM
     /// (LibRaw unpack + demosaic + mem image + JPEG encode for a 45 MP raw),
     /// capped by core count; explicit limits are floor-1.
     public static func workerCount(activeProcessors: Int,
@@ -571,7 +571,7 @@ In `DecodeEngine`:
         if let limit {
             return max(1, limit)
         }
-        let byMemory = max(1, Int(physicalMemoryBytes / (512 * 1024 * 1024)))
+        let byMemory = max(1, Int(physicalMemoryBytes / (2 * 1024 * 1024 * 1024)))
         return min(max(1, activeProcessors), byMemory)
     }
 ```

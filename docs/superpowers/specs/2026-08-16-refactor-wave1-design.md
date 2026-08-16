@@ -72,7 +72,7 @@ Air); parallel 45MP decodes (≈300 MB/worker transient) can push small-RAM
 machines into swap. New rule:
 
 ```
-workers = min(activeProcessorCount, max(1, physicalMemory / 512MB))
+workers = min(activeProcessorCount, max(1, physicalMemory / 2GB))
 ```
 
 - 8 GB → 4 workers; 16 GB → 8; 32 GB → 16, capped at core count.
