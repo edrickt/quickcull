@@ -1,25 +1,25 @@
 # QuickCull
 
-Native macOS app for fast raw-image culling. Culls raw files from all major
-camera manufacturers: decode everything to high-quality JPEG, scrub with the
+A native macOS app for fast photo culling: decode raws from every major camera
+manufacturer (plus JPEG, PNG, HEIC) to high-quality previews, scrub with the
 arrow keys, flag rejects with Z, commit to Trash.
 
 See `docs/superpowers/specs/` for the design.
 
-## How it works (v1 flow)
+## How it works
 
-1. **Select raws** — select raw files via the file picker (multi-select).
-   Supported extensions are recognized; unsupported formats are reported and
-   skipped.
-2. **Decode all** — every raw is demosaiced in full resolution with LibRaw and
-   written to the local cache as a q75 JPEG. Decoding runs before scrubbing
-   starts, so arrow-key navigation never waits on disk.
-3. **Scrub** — step through the culled set with the keyboard. Only a ±30-file
-   window around the current position is held in memory at once. Files that
-   fail to decode are skipped and surfaced in a dismissible banner.
-4. **Commit** — flag rejects with `Z`, then commit to Trash. Every flagged
-   file is moved to the macOS Trash; failures are reported per file, and the
-   app stays in the session so you can retry.
+1. **Select photos.** Multi-select with the file picker. Unsupported formats
+   are listed in a dismissible banner instead of vanishing from the count.
+2. **Decode all.** Raws are demosaiced at full resolution with LibRaw; JPEG,
+   PNG, and HEIC go through ImageIO. Everything lands in the local cache as a
+   q75 JPEG. Decoding finishes before scrubbing starts, so the arrow keys
+   never wait on a decode.
+3. **Scrub.** Step through with the keyboard. Only a ±30-file window around
+   the current photo stays in memory. Files that fail to decode are skipped
+   and listed in the banner.
+4. **Commit.** Flag rejects with `Z`, then commit to Trash. Every flagged
+   file is moved to the macOS Trash; files that fail are kept, still flagged,
+   so you can retry.
 
 ## Supported formats
 
@@ -37,32 +37,33 @@ Common formats (decoded via ImageIO, EXIF orientation baked in): JPEG
 | -------------- | ------------------------------------------- |
 | `←` / `→`      | Previous / next photo                       |
 | `↑` / `↓`      | Jump back / forward 10 photos               |
-| `Z`            | Toggle the reject flag (badge shown)        |
+| `Z`            | Toggle the reject flag (red corner triangle) |
 
 Click a filmstrip thumbnail to jump straight to that photo.
 
+## Run
+
+`./start.sh` builds a Release copy and launches it (quitting any running
+instance first). `./stop.sh` quits the app.
+
 ## Cache
 
-Decoded images are stored as full-resolution q75 JPEGs in
+Decoded photos are stored as full-resolution q75 JPEGs in
 `~/Library/Application Support/QuickCull/cache`, keyed by file path. The cache
-is wiped on launch (and best-effort on quit), so each session re-decodes from
-the originals and never accumulates stale data.
+is wiped on launch (and best-effort on quit), so every session decodes from
+the originals.
 
 ## Build
 
 Requires Xcode (16+) on macOS 14+. The first build downloads and compiles
 LibRaw 0.22.1 into `Build/libraw/` automatically (universal arm64 + x86_64
-dylib); rebuilds after a clean take a few minutes.
+dylib); a clean rebuild takes a few minutes.
 
-    xcodebuild -project QuickCull.xcodeproj -scheme QuickCull \
-      -configuration Debug -destination 'platform=macOS' \
-      -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build
+    xcodebuild -project QuickCull.xcodeproj -scheme QuickCull build
 
 ## Test
 
-Build the test bundle, then run it directly with `xcrun xctest` (the project
-is configured for testing; run the tests on the built bundle rather than via
-`xcodebuild test`):
+Build the test bundle, then run it directly with `xcrun xctest`:
 
     xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
       -configuration Debug -destination 'platform=macOS' \
@@ -70,8 +71,8 @@ is configured for testing; run the tests on the built bundle rather than via
 
     xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 
-The logic test suite (decoder, cache, session, windowing, key map, commit,
-integration) covers the whole culling pipeline.
+65 tests cover the decoder, cache, session, windows, key map, commit, and the
+full import pipeline.
 
 ### Fixtures
 
@@ -81,8 +82,8 @@ restore them with:
 
     Scripts/fetch-fixtures.sh
 
-This downloads from the public sources used during development and verifies
-every file against its pinned sha256.
+It downloads from the public sample sources and checks every file against its
+pinned sha256.
 
 ## Licensing
 
@@ -94,4 +95,4 @@ library is shipped unmodified and may be replaced with your own build; see
 
 - Zoom / pan inside the viewer
 - Undo of a Trash commit
-- Persistent flags across sessions (flags are per session by design)
+- Persistent flags across sessions
