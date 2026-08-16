@@ -105,4 +105,20 @@ final class ImageCacheStoreTests: XCTestCase {
         await store.deleteCachedJPEG(for: file)
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
+
+    func testStoreJPEGReplacesExistingEntryAtomically() async throws {
+        let file = try makeFile("a.cr2")
+        let first = try await store.storeJPEG(makeBitmap(), for: file)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        // Overwrite; the entry must still exist and stay decodable.
+        let second = try await store.storeJPEG(makeBitmap(), for: file)
+        XCTAssertEqual(first, second)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+        guard let source = CGImageSourceCreateWithURL(second as CFURL, nil) else {
+            return XCTFail("replaced entry not decodable")
+        }
+        XCTAssertEqual(CGImageSourceGetCount(source), 1)
+        let names = try FileManager.default.contentsOfDirectory(atPath: base.path)
+        XCTAssertFalse(names.contains { $0.hasSuffix(".tmp") })
+    }
 }

@@ -68,8 +68,11 @@ public actor ImageCacheStore {
         guard CGImageDestinationFinalize(sink) else {
             throw CacheError.cannotEncode
         }
-        try? FileManager.default.removeItem(at: destination)
-        try FileManager.default.moveItem(at: tmp, to: destination)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: tmp)
+        } else {
+            try FileManager.default.moveItem(at: tmp, to: destination)
+        }
         return destination
     }
 
