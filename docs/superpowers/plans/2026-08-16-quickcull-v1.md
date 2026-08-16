@@ -19,6 +19,7 @@
 - Module/product names: app `QuickCull` (bundle id `com.quickcull.app`), framework `QuickCullCore` (`com.quickcull.core`), tests `QuickCullCoreTests` (`com.quickcull.core.tests`).
 - LGPL-2.1 compliance: `libraw.dylib` is dynamically linked, embedded at `QuickCullCore.framework/Versions/A/Frameworks/libraw.dylib`, and user-replaceable (documented in README/NOTICE).
 - All verification commands use `-derivedDataPath /tmp/qc-dd` and `CODE_SIGNING_ALLOWED=NO` (required in the sandboxed harness; harmless on a developer Mac). Run every command from the repo root.
+- In this sandboxed harness, macro expansion (any `@Observable` compile) additionally requires `OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -disable-sandbox'` on xcodebuild invocations (swift-plugin-server's nested sandbox-exec is denied by the harness seatbelt). Invocation-only; never add it to the project. Real-Mac builds need no flag.
 - Repository root: `/Users/oslo/Files/github/quickcull` (git repo already initialized, spec committed).
 
 ## Architecture Note (validated deviation from spec wording)
@@ -2612,7 +2613,9 @@ final class AppStateTests: XCTestCase {
         state.importFiles(urls: [a, b])
         await waitForScrubbing(state)
 
-        state.handle(.toggleFlag)
+        state.handle(.toggleFlag)   // flag a
+        state.handle(.next)
+        state.handle(.toggleFlag)   // flag b
         state.requestCommit()
         state.confirmCommit()
         XCTAssertEqual(state.session?.count, 1)        // a stays
@@ -2703,7 +2706,7 @@ public final class AppState {
 
         let engine = DecodeEngine(decoder: decoder, cache: cache)
         Task {
-            for await event in engine.decodeAll(files: files) {
+            for await event in await engine.decodeAll(files: files) {
                 switch event {
                 case .progress(let completed, let total):
                     phase = .decoding(completed: completed, total: total)
