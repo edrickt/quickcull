@@ -1088,7 +1088,8 @@ public struct RawBitmap {
     public let image: CGImage
     public let width: Int
     public let height: Int
-    /// LibRaw flip value (0-7); drives JPEG orientation.
+    /// LibRaw flip value (0-7). Informational only: the pixel buffer is
+    /// already upright (dcraw_process applied the rotation).
     public let flip: Int
 
     public init(image: CGImage, width: Int, height: Int, flip: Int) {
@@ -1400,10 +1401,10 @@ public actor ImageCacheStore {
             tmp as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw CacheError.cannotCreateDestination
         }
-        var props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: Self.jpegQuality]
-        if let orientation = exifOrientation(forFlip: bitmap.flip) {
-            props[kCGImagePropertyOrientation] = orientation
-        }
+        // No orientation tag: libraw's dcraw_process already rotated the
+        // pixels upright, so writing a flip-derived tag would rotate them
+        // again (display + external viewers).
+        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: Self.jpegQuality]
         CGImageDestinationAddImage(sink, bitmap.image, props as CFDictionary)
         guard CGImageDestinationFinalize(sink) else {
             throw CacheError.cannotEncode
@@ -1419,20 +1420,6 @@ public actor ImageCacheStore {
         }
     }
 
-    /// dcraw flip code -> EXIF orientation (1-8); nil when unknown.
-    public func exifOrientation(forFlip flip: Int) -> Int? {
-        switch flip {
-        case 0: return 1
-        case 1: return 2
-        case 2: return 4
-        case 3: return 3
-        case 4: return 5
-        case 5: return 8
-        case 6: return 6
-        case 7: return 7
-        default: return nil
-        }
-    }
 }
 
 public enum CacheError: Error {
@@ -1592,12 +1579,17 @@ public final class Session {
     }
 
     /// Remove trashed files after a successful commit. All flags are cleared
-    /// (flagged files are exactly the ones being removed).
+    /// (flagged files are exactly the ones being removed). The current index
+    /// shifts down by the number of removed files that preceded it, so the
+    /// current photo stays the same file when possible.
     public func remove(_ filesToRemove: [SessionFile]) {
         let ids = Set(filesToRemove.map(\.id))
+        let removedBeforeCurrent = files.enumerated()
+            .filter { $0.offset < currentIndex && ids.contains($0.element.id) }
+            .count
         flagged.subtract(ids)
         files.removeAll { ids.contains($0.id) }
-        currentIndex = min(max(currentIndex, 0), max(files.count - 1, 0))
+        currentIndex = min(max(currentIndex - removedBeforeCurrent, 0), max(files.count - 1, 0))
     }
 }
 ```
@@ -2713,6 +2705,17 @@ public final class AppState {
         let supported = unique.filter(RawFileIdentity.isSupported)
         guard !supported.isEmpty else { return }
 
+        guard !supported.isEmpty else {
+            // Nothing importable: surface the unsupported selection in the
+            // empty-state banner instead of silently ignoring it.
+            importFailures = unique.map {
+                DecodeOutcome(file: SessionFile(url: $0),
+                              error: .cannotOpen("Unsupported format"))
+            }
+            phase = .empty
+            return
+        }
+
         let files = supported.map(SessionFile.init)
         session = Session(files: files)
         importFailures = []
@@ -2728,7 +2731,23 @@ public final class AppState {
                     phase = .decoding(completed: completed, total: total)
                 case .completed(let outcomes):
                     importFailures = outcomes.filter { $0.error != nil }
-                    finishDecoding(files: files)
+                    let failed = outcomes.filter { $0.error != nil }.map(\.file)
+                    if !failed.isEmpty {
+                        // Spec: the session proceeds without the failed files.
+                        // Flags are empty at this point, so remove() only
+                        // drops the files (and shifts the index correctly).
+                        session?.remove(failed)
+                    }
+                    if session?.isEmpty == true {
+                        // All failed: back to the empty state; its banner
+                        // surfaces the failures.
+                        session = nil
+                        thumbWindow = nil
+                        displayImages = nil
+                        phase = .empty
+                    } else if let remaining = session {
+                        finishDecoding(files: remaining.files)
+                    }
                 }
             }
         }
