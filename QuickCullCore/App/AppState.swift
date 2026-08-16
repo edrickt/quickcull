@@ -20,8 +20,8 @@ public final class AppState {
     public private(set) var commitFailures: [TrashOutcome] = []
     public private(set) var pendingCommitCount: Int = 0
 
-    public private(set) var thumbWindow: SlidingWindow?
-    public private(set) var displayImages: DisplayImageProvider?
+    public private(set) var thumbWindow: ImageWindow?
+    public private(set) var displayImages: ImageWindow?
 
     public let cache: ImageCacheStore
     private let decoder: RawDecoding
@@ -103,12 +103,14 @@ public final class AppState {
     }
 
     private func finishDecoding(files: [SessionFile]) {
-        guard let session else { return }
-        thumbWindow = SlidingWindow(radius: 30, count: session.count,
-                                    thumbnailLoader: makeThumbLoader(files: files))
-        displayImages = DisplayImageProvider(loader: makeDisplayLoader(files: files))
-        syncWindows()
+        installWindows(for: files)
         phase = .scrubbing
+    }
+
+    private func installWindows(for files: [SessionFile]) {
+        thumbWindow = ImageWindow.thumbnails(files: files, cache: cache)
+        displayImages = ImageWindow.display(files: files, cache: cache)
+        syncWindows()
     }
 
     /// Dismisses the import-failure banner once the user has seen it.
@@ -116,23 +118,6 @@ public final class AppState {
     /// scrub phase can surface them.
     public func dismissImportFailures() {
         importFailures = []
-    }
-
-    private func makeThumbLoader(files: [SessionFile]) -> (Int) async -> CGImage? {
-        { [cache] index in
-            guard index >= 0, index < files.count else { return nil }
-            return Self.loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                                 maxPixelSize: 320)
-        }
-    }
-
-    private func makeDisplayLoader(files: [SessionFile]) -> (Int) async -> CGImage? {
-        let pixels = Self.displayPixelLimit()
-        return { [cache] index in
-            guard index >= 0, index < files.count else { return nil }
-            return Self.loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                                 maxPixelSize: pixels)
-        }
     }
 
     public func handle(_ action: CullAction) {
@@ -178,39 +163,11 @@ public final class AppState {
             displayImages = nil
             phase = .empty
         } else {
-            rebuildWindows()
+            installWindows(for: session.files)
         }
     }
 
     public func cancelCommit() {
         pendingCommitCount = 0
-    }
-
-    private func rebuildWindows() {
-        thumbWindow = nil
-        displayImages = nil
-        if let session, !session.isEmpty {
-            thumbWindow = SlidingWindow(radius: 30, count: session.count,
-                                        thumbnailLoader: makeThumbLoader(files: session.files))
-            displayImages = DisplayImageProvider(loader: makeDisplayLoader(files: session.files))
-            syncWindows()
-        }
-    }
-
-    private static func displayPixelLimit() -> Int {
-        Int(max(NSScreen.main?.frame.width ?? 1920,
-                NSScreen.main?.frame.height ?? 1080) * 2)
-    }
-
-    /// Downsamples a cached JPEG (thumbnail API = memory-bounded).
-    static func loadJPEG(at url: URL?, maxPixelSize: Int) -> CGImage? {
-        guard let url,
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }

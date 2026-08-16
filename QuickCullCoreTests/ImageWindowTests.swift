@@ -1,10 +1,11 @@
 import CoreGraphics
 import ImageIO
+import Observation
 import XCTest
 @testable import QuickCullCore
 
 @MainActor
-final class SlidingWindowTests: XCTestCase {
+final class ImageWindowTests: XCTestCase {
     private var fixtureDir: URL!
     private let count = 100
 
@@ -50,17 +51,17 @@ final class SlidingWindowTests: XCTestCase {
     }
 
     func testWindowNeverExceedsRadiusPlusOne() async {
-        let window = SlidingWindow(radius: 30, count: count, thumbnailLoader: makeLoader())
+        let window = ImageWindow(radius: 30, count: count, loader: makeLoader())
         for index in [0, 5, 50, 95, 99, 50, 0] {
             window.setCurrent(index)
             await window.waitUntilSettled()
-            XCTAssertLessThanOrEqual(window.thumbnails.count, 61)
+            XCTAssertLessThanOrEqual(window.images.count, 61)
         }
     }
 
     func testCurrentImageLoadedFirst() async {
         var seen: [Int] = []
-        let window = SlidingWindow(radius: 30, count: count) { index in
+        let window = ImageWindow(radius: 30, count: count) { index in
             seen.append(index)
             return nil
         }
@@ -70,7 +71,7 @@ final class SlidingWindowTests: XCTestCase {
     }
 
     func testEvictionDropsFarEdges() async {
-        let window = SlidingWindow(radius: 2, count: count, thumbnailLoader: makeLoader())
+        let window = ImageWindow(radius: 2, count: count, loader: makeLoader())
         window.setCurrent(50)
         await window.waitUntilSettled()
         window.setCurrent(99)
@@ -79,23 +80,23 @@ final class SlidingWindowTests: XCTestCase {
         XCTAssertNotNil(window.image(at: 97))
     }
 
-    func testDisplayProviderKeepsAtMostThree() async {
-        let provider = DisplayImageProvider(loader: makeLoader())
+    func testDisplayRadiusKeepsAtMostThree() async {
+        let window = ImageWindow(radius: 1, count: count, loader: makeLoader())
         for index in [0, 1, 2, 3, 10, 99] {
-            provider.setCurrent(index)
-            await provider.waitUntilSettled()
-            XCTAssertLessThanOrEqual(provider.images.count, 3)
+            window.setCurrent(index)
+            await window.waitUntilSettled()
+            XCTAssertLessThanOrEqual(window.images.count, 3)
         }
-        provider.setCurrent(50)
-        await provider.waitUntilSettled()
-        XCTAssertNotNil(provider.image(at: 50))
-        XCTAssertNotNil(provider.image(at: 49))
-        XCTAssertNotNil(provider.image(at: 51))
-        XCTAssertNil(provider.image(at: 48))
+        window.setCurrent(50)
+        await window.waitUntilSettled()
+        XCTAssertNotNil(window.image(at: 50))
+        XCTAssertNotNil(window.image(at: 49))
+        XCTAssertNotNil(window.image(at: 51))
+        XCTAssertNil(window.image(at: 48))
     }
 
-    func testSlidingWindowThumbnailPopulationIsObservable() async {
-        let window = SlidingWindow(radius: 30, count: count, thumbnailLoader: makeLoader())
+    func testImagePopulationIsObservable() async {
+        let window = ImageWindow(radius: 30, count: count, loader: makeLoader())
         var fired = false
         withObservationTracking {
             _ = window.image(at: 0)
@@ -104,27 +105,21 @@ final class SlidingWindowTests: XCTestCase {
         }
         window.setCurrent(0)
         await window.waitUntilSettled()
-        // onChange is delivered on a later runloop turn.
         for _ in 0..<10 where !fired {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
-        XCTAssertTrue(fired, "thumbnail population must fire observation")
+        XCTAssertTrue(fired, "image population must fire observation")
     }
 
-    func testDisplayProviderImagePopulationIsObservable() async {
-        let provider = DisplayImageProvider(loader: makeLoader())
-        var fired = false
-        withObservationTracking {
-            _ = provider.image(at: 0)
-        } onChange: {
-            fired = true
+    func testWaitUntilSettledHonorsTimeout() async {
+        let window = ImageWindow(radius: 30, count: 3) { _ in
+            try? await Task.sleep(nanoseconds: 500_000_000)  // slow loader
+            return nil
         }
-        provider.setCurrent(0)
-        await provider.waitUntilSettled()
-        for _ in 0..<10 where !fired {
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-        XCTAssertTrue(fired, "display image population must fire observation")
+        window.setCurrent(0)
+        let start = Date()
+        await window.waitUntilSettled(timeout: 0.05)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.4,
+                          "timeout must return before the slow loader finishes")
     }
-
 }
