@@ -3136,9 +3136,14 @@ struct FilmstripView: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 3) {
-                    ForEach(0..<(appState.session?.count ?? 0), id: \.self) { index in
-                        ThumbnailCell(index: index)
-                            .id(index)
+                    // Iterate the files themselves, keyed by stable file id.
+                    // Never ForEach(0..<count) with array subscripts in cells:
+                    // when a commit shrinks the session, lazy stacks can
+                    // re-render a surviving cell with a stale range index and
+                    // trap on files[index] (crash).
+                    ForEach(Array((appState.session?.files ?? []).enumerated()),
+                            id: \.element.id) { index, file in
+                        ThumbnailCell(index: index, file: file)
                     }
                 }
                 .padding(6)
@@ -3156,6 +3161,7 @@ struct FilmstripView: View {
 
 struct ThumbnailCell: View {
     let index: Int
+    let file: SessionFile
     @Environment(AppState.self) private var appState
 
     var body: some View {
@@ -3167,8 +3173,7 @@ struct ThumbnailCell: View {
             } else {
                 Rectangle().fill(.quaternary)
             }
-            if let file = appState.session?.files[index],
-               appState.session?.isFlagged(file) == true {
+            if appState.session?.isFlagged(file) == true {
                 FlagBadge()
             }
         }
