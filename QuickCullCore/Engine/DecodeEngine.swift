@@ -11,8 +11,8 @@ public struct DecodeOutcome: Equatable {
 }
 
 /// Phase 1: decode every file to a cached full-res q75 JPEG in parallel,
-/// bounded by the number of performance cores. Emits progress events, then
-/// exactly one completed event with per-file outcomes.
+/// bounded by the number of performance cores. Emits strictly monotonic
+/// progress events, then exactly one completed event with per-file outcomes.
 public actor DecodeEngine {
     public enum Event {
         case progress(completed: Int, total: Int)
@@ -35,7 +35,7 @@ public actor DecodeEngine {
                 for file in files { await queue.enqueue(file) }
 
                 let total = files.count
-                let counter = AtomicCounter()
+                let reporter = ProgressReporter(total: total, continuation: continuation)
                 let outcomes = AtomicOutcomeAccumulator()
 
                 await withTaskGroup(of: Void.self) { group in
@@ -54,8 +54,7 @@ public actor DecodeEngine {
                                                             error: .cannotProcess("\(error)"))
                                 }
                                 outcomes.append(outcome)
-                                let completed = counter.increment()
-                                continuation.yield(.progress(completed: completed, total: total))
+                                await reporter.reportProgress()
                             }
                         }
                     }
@@ -81,14 +80,23 @@ actor JobQueue<Element> {
     }
 }
 
-final class AtomicCounter: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = 0
+/// Serializes progress delivery: increments and yields inside one actor
+/// isolation, so there is no preemption window between the two — delivered
+/// `completed:` values are strictly monotonic by construction, not by
+/// scheduling accident.
+actor ProgressReporter {
+    private let continuation: AsyncStream<DecodeEngine.Event>.Continuation
+    private let total: Int
+    private var completed = 0
 
-    func increment() -> Int {
-        lock.lock(); defer { lock.unlock() }
-        value += 1
-        return value
+    init(total: Int, continuation: AsyncStream<DecodeEngine.Event>.Continuation) {
+        self.total = total
+        self.continuation = continuation
+    }
+
+    func reportProgress() {
+        completed += 1
+        continuation.yield(.progress(completed: completed, total: total))
     }
 }
 
