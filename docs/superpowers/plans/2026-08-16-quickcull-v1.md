@@ -68,7 +68,8 @@ quickcull/
 │   └── *.swift                          # one test file per core unit
 ├── Scripts/
 │   ├── build-libraw.sh                  # vendored LibRaw 0.22.1 → universal dylib
-│   └── fetch-fixtures.sh                # raw sample fixtures (sha256-pinned)
+│   ├── fetch-fixtures.sh                # raw sample fixtures (sha256-pinned)
+│   └── copy-test-fixtures.sh            # structured Fixtures tree into test bundle
 ├── docs/superpowers/specs/2026-08-16-quickcull-design.md   # (already committed)
 ├── README.md
 ├── NOTICE                                 # LibRaw LGPL notice
@@ -347,6 +348,7 @@ lipo -info "$DEST/libraw.dylib"
 				B1000000000000000000000B /* Sources */,
 				B1000000000000000000000A /* Frameworks */,
 				B1000000000000000000000C /* Resources */,
+				C10000000000000000000008 /* Copy Test Fixtures */,
 			);
 			buildRules = (
 			);
@@ -431,6 +433,25 @@ lipo -info "$DEST/libraw.dylib"
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		C10000000000000000000008 /* Copy Test Fixtures */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Test Fixtures";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "bash \"$PROJECT_DIR/Scripts/copy-test-fixtures.sh\"\n";
+		};
 		C10000000000000000000002 /* Build LibRaw */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -889,7 +910,7 @@ DEST="$ROOT/QuickCullCoreTests/Fixtures/raws"
 mkdir -p "$DEST"
 fetch() { # url sha256 name
   local url="$1" sum="$2" name="$3"
-  echo "Fetching $name…"
+  echo "Fetching $name ..."
   curl -fsSL -o "$DEST/$name" "$url"
   echo "$sum  $DEST/$name" | shasum -a 256 -c -
 }
@@ -907,7 +928,7 @@ fetch "https://raw.githubusercontent.com/exiftool/exiftool/master/t/images/Phase
 echo "All fixtures fetched."
 ```
 
-Note: fixture files are ~100 MB total and are committed to the repo (they are test resources; the synchronized `QuickCullCoreTests` folder copies them into the test bundle automatically). The DNG fixture doubles as Leica coverage (Leica raws are DNG).
+Note: fixture files are ~100 MB total and are committed to the repo (they are test resources). Xcode 26's synchronized-folder resource sync FLATTENS subfolder structure, so a "Copy Test Fixtures" script phase on the tests target (phase `C10000000000000000000008`, running `Scripts/copy-test-fixtures.sh`, created in this task) installs the structured `Fixtures/` tree into the test bundle — tests reach files via `Bundle(for:)` + `subdirectory: "Fixtures/raws"`. The DNG fixture doubles as Leica coverage (Leica raws are DNG).
 
 - [ ] **Step 2: Run it and verify checksums pass**
 
@@ -1110,18 +1131,18 @@ public final class LibRawDecoder: RawDecoding {
         defer { libraw_close(handle) }
 
         var ret = libraw_open_file(handle, url.path)
-        guard ret == LIBRAW_SUCCESS else {
+        guard ret == LIBRAW_SUCCESS.rawValue else {
             throw DecodeError.cannotOpen(errorString(ret))
         }
 
         ret = libraw_unpack(handle)
-        guard ret == LIBRAW_SUCCESS else {
+        guard ret == LIBRAW_SUCCESS.rawValue else {
             throw DecodeError.cannotUnpack(errorString(ret))
         }
 
         handle.pointee.params.output_bps = 8
         ret = libraw_dcraw_process(handle)
-        guard ret == LIBRAW_SUCCESS else {
+        guard ret == LIBRAW_SUCCESS.rawValue else {
             throw DecodeError.cannotProcess(errorString(ret))
         }
 
@@ -1138,7 +1159,13 @@ public final class LibRawDecoder: RawDecoding {
             throw DecodeError.invalidOutput
         }
 
-        let data = Data(bytes: p.data, count: Int(p.data_size))
+        // `data` is a C flexible-array member (`unsigned char data[1]`), which
+        // Swift imports as a `UInt8` scalar; the pixel buffer lives immediately
+        // after the struct in libraw's allocation, so take its address through
+        // the heap pointee (a `let p = processed.pointee` copy would not do).
+        let data = withUnsafePointer(to: &processed.pointee.data) { ptr in
+            Data(bytes: ptr, count: Int(p.data_size))
+        }
         guard let provider = CGDataProvider(data: data as CFData),
               let image = CGImage(
                   width: Int(p.width), height: Int(p.height),
