@@ -21,16 +21,34 @@ public actor DecodeEngine {
 
     private let decoder: RawDecoding
     private let cache: ImageCacheStore
+    private let workerCount: Int
 
-    public init(decoder: RawDecoding, cache: ImageCacheStore) {
+    public init(decoder: RawDecoding, cache: ImageCacheStore, workerLimit: Int? = nil) {
         self.decoder = decoder
         self.cache = cache
+        self.workerCount = Self.workerCount(
+            activeProcessors: ProcessInfo.processInfo.activeProcessorCount,
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+            limit: workerLimit)
+    }
+
+    /// Memory-bounded worker rule: one worker per 2 GB of physical RAM
+    /// (LibRaw unpack + demosaic + mem image + JPEG encode for a 45 MP raw
+    /// needs ≈512 MB transient per worker), capped by core count; explicit
+    /// limits are floor-1.
+    public static func workerCount(activeProcessors: Int,
+                                   physicalMemoryBytes: UInt64,
+                                   limit: Int?) -> Int {
+        if let limit {
+            return max(1, limit)
+        }
+        let byMemory = max(1, Int(physicalMemoryBytes / (2 * 1024 * 1024 * 1024)))
+        return min(max(1, activeProcessors), byMemory)
     }
 
     public func decodeAll(files: [SessionFile]) -> AsyncStream<Event> {
         AsyncStream { continuation in
             let task = Task {
-                let workerCount = max(1, ProcessInfo.processInfo.activeProcessorCount)
                 let queue = JobQueue<SessionFile>()
                 for file in files { await queue.enqueue(file) }
 
@@ -42,6 +60,7 @@ public actor DecodeEngine {
                     for _ in 0..<workerCount {
                         group.addTask {
                             while let file = await queue.dequeue() {
+                                if Task.isCancelled { break }
                                 let outcome: DecodeOutcome
                                 do {
                                     let bitmap = try self.decoder.decodeRaw(at: file.url)

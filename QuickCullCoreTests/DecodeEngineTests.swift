@@ -88,6 +88,36 @@ final class DecodeEngineTests: XCTestCase {
         XCTAssertTrue(contents.allSatisfy { $0.hasSuffix(".jpg") })
     }
 
+    func testWorkerCountFormula() {
+        let gb = UInt64(1024 * 1024 * 1024)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: nil), 4)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 16, physicalMemoryBytes: 16 * gb, limit: nil), 8)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 32, physicalMemoryBytes: 32 * gb, limit: nil), 16)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 2, physicalMemoryBytes: 8 * gb, limit: nil), 2)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: 2), 2)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: 0), 1)
+    }
+
+    func testCancellationStopsWorkers() async throws {
+        let files = makeFiles((0..<20).map { "img_\($0).cr2" })
+        let decoder = SlowStubDecoder(delay: 50_000_000)   // 50 ms per decode
+        let (cache, base) = try await makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let engine = DecodeEngine(decoder: decoder, cache: cache, workerLimit: 2)
+
+        let consumer = Task {
+            var events: [DecodeEngine.Event] = []
+            for await event in await engine.decodeAll(files: files) { events.append(event) }
+            return events
+        }
+        // Let a couple of files decode, then cancel the consumer.
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        consumer.cancel()
+        _ = await consumer.value
+        // Workers stop early: far fewer than 20 files decoded.
+        XCTAssertLessThan(decoder.callCount(), 20, "cancellation must stop the worker pool")
+    }
+
     func testRealDecoderIntegrationWithFixtures() async throws {
         // Uses the real LibRawDecoder on the small 8-file fixture set.
         let bundle = Bundle(for: Self.self)
