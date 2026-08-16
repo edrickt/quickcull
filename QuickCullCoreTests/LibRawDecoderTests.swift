@@ -38,4 +38,33 @@ final class LibRawDecoderTests: XCTestCase {
     func testMissingFileThrowsCannotOpen() {
         XCTAssertThrowsError(try decoder.decodeRaw(at: URL(fileURLWithPath: "/nonexistent/photo.cr2")))
     }
+
+    /// End-to-end orientation check: dcraw_process already rotates the raw
+    /// (olympus decodes to 1926x2576 upright portrait with flip=5), so the
+    /// cached JPEG must carry no orientation tag — loading it the way
+    /// AppState.loadJPEG does (thumbnail + transform) must NOT rotate again.
+    func testOrientedRawStaysUprightThroughCacheRoundTrip() async throws {
+        let url = fixture("olympus_c5050z", "orf")
+        let bitmap = try decoder.decodeRaw(at: url)
+        XCTAssertEqual(bitmap.flip, 5)
+
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("qc-orient-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = ImageCacheStore(baseURL: base)
+        let cached = try await store.storeJPEG(bitmap, for: SessionFile(url: url))
+
+        guard let source = CGImageSourceCreateWithURL(cached as CFURL, nil) else {
+            return XCTFail("cached JPEG not decodable")
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let thumb = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return XCTFail("thumbnail creation failed")
+        }
+        XCTAssertEqual(thumb.width, 1926)
+        XCTAssertEqual(thumb.height, 2576)
+    }
 }

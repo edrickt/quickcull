@@ -76,7 +76,7 @@ final class ImageCacheStoreTests: XCTestCase {
         XCTAssertEqual(props?[kCGImagePropertyPixelHeight] as? Int, 16)
     }
 
-    func testStoreJPEGOrientationForFlip() async throws {
+    func testStoreJPEGWritesNoOrientationTag() async throws {
         let file = try makeFile("a.cr2")
         var bitmap = makeBitmap()
         bitmap = RawBitmap(image: bitmap.image, width: bitmap.width,
@@ -86,7 +86,10 @@ final class ImageCacheStoreTests: XCTestCase {
             return XCTFail("not a decodable image")
         }
         let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        XCTAssertEqual(props?[kCGImagePropertyOrientation] as? Int, 8)
+        // Pixels are already upright; an orientation tag would cause
+        // consumers using kCGImageSourceCreateThumbnailWithTransform to
+        // rotate the already-upright bitmap a second time.
+        XCTAssertNil(props?[kCGImagePropertyOrientation])
     }
 
     func testStoreJPEGLeavesNoTmpFiles() async throws {

@@ -48,6 +48,10 @@ public actor ImageCacheStore {
     }
 
     /// Encode the bitmap to a q75 JPEG and write it atomically (tmp + rename).
+    ///
+    /// The bitmap is already upright: `dcraw_process` applies the raw's flip
+    /// to the pixel buffer before we ever see it. No EXIF orientation tag is
+    /// written, so consumers must not transform the pixels again.
     @discardableResult
     public func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile) throws -> URL {
         try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
@@ -59,10 +63,7 @@ public actor ImageCacheStore {
             tmp as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw CacheError.cannotCreateDestination
         }
-        var props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: Self.jpegQuality]
-        if let orientation = exifOrientation(forFlip: bitmap.flip) {
-            props[kCGImagePropertyOrientation] = orientation
-        }
+        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: Self.jpegQuality]
         CGImageDestinationAddImage(sink, bitmap.image, props as CFDictionary)
         guard CGImageDestinationFinalize(sink) else {
             throw CacheError.cannotEncode
@@ -75,21 +76,6 @@ public actor ImageCacheStore {
     public func deleteCachedJPEG(for file: SessionFile) {
         if let url = try? cacheURL(for: file) {
             try? FileManager.default.removeItem(at: url)
-        }
-    }
-
-    /// dcraw flip code -> EXIF orientation (1-8); nil when unknown.
-    public func exifOrientation(forFlip flip: Int) -> Int? {
-        switch flip {
-        case 0: return 1
-        case 1: return 2
-        case 2: return 4
-        case 3: return 3
-        case 4: return 5
-        case 5: return 8
-        case 6: return 6
-        case 7: return 7
-        default: return nil
         }
     }
 }

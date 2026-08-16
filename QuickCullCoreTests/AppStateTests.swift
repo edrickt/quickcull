@@ -37,6 +37,14 @@ final class AppStateTests: XCTestCase {
         XCTFail("never reached scrubbing")
     }
 
+    private func waitForEmpty(_ state: AppState) async {
+        for _ in 0..<200 {   // bounded wait; stub decode is instant
+            if state.session == nil && state.phase == .empty { return }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("never reached empty state")
+    }
+
     func testImportFiltersUnsupportedAndDedupes() async throws {
         let a = try makeRaw("a.cr2")
         let b = try makeRaw("b.jpg")
@@ -143,5 +151,29 @@ final class AppStateTests: XCTestCase {
 
         state.dismissImportFailures()
         XCTAssertTrue(state.importFailures.isEmpty)
+    }
+
+    func testFailedFilesAreRemovedFromSession() async throws {
+        let ok = try makeRaw("ok.cr2")
+        let bad = try makeRaw("bad.cr2")
+        let state = makeState(decoder: StubDecoder(failIDs: [bad.path]))
+        state.importFiles(urls: [ok, bad])
+        await waitForScrubbing(state)
+
+        // Spec: the session proceeds WITHOUT the failed file.
+        XCTAssertEqual(state.session?.count, 1)
+        XCTAssertEqual(state.importFailures.count, 1)
+    }
+
+    func testAllFailedReturnsToEmptyState() async throws {
+        let bad1 = try makeRaw("bad1.cr2")
+        let bad2 = try makeRaw("bad2.cr2")
+        let state = makeState(decoder: StubDecoder(failIDs: [bad1.path, bad2.path]))
+        state.importFiles(urls: [bad1, bad2])
+        await waitForEmpty(state)
+
+        XCTAssertEqual(state.importFailures.count, 2)
+        XCTAssertEqual(state.phase, .empty)
+        XCTAssertNil(state.session)
     }
 }

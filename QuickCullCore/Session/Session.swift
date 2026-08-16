@@ -52,11 +52,16 @@ public final class Session {
     }
 
     /// Remove trashed files after a successful commit. All flags are cleared
-    /// (flagged files are exactly the ones being removed).
+    /// (flagged files are exactly the ones being removed). The current photo
+    /// is preserved: if files before it were removed, the index shifts back
+    /// by that count so `currentFile` does not silently change.
     public func remove(_ filesToRemove: [SessionFile]) {
         let ids = Set(filesToRemove.map(\.id))
+        let removedBeforeCurrent = files.enumerated()
+            .filter { $0.offset < currentIndex && ids.contains($0.element.id) }
+            .count
         flagged.subtract(ids)
         files.removeAll { ids.contains($0.id) }
-        currentIndex = min(max(currentIndex, 0), max(files.count - 1, 0))
+        currentIndex = min(max(currentIndex - removedBeforeCurrent, 0), max(files.count - 1, 0))
     }
 }

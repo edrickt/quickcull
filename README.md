@@ -8,8 +8,9 @@ See `docs/superpowers/specs/` for the design.
 
 ## How it works (v1 flow)
 
-1. **Select raws** — pick a folder of raw files (or drag them in). Supported
-   extensions are recognized; unsupported files are skipped and reported.
+1. **Select raws** — select raw files via the file picker (multi-select).
+   Supported extensions are recognized; unsupported formats are reported and
+   skipped.
 2. **Decode all** — every raw is demosaiced in full resolution with LibRaw and
    written to the local cache as a q75 JPEG. Decoding runs before scrubbing
    starts, so arrow-key navigation never waits on disk.

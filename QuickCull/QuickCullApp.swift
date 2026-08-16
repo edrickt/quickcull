@@ -25,6 +25,12 @@ struct QuickCullApp: App {
                         Task { try? await cache.wipe() }
                     }
                 }
+                .onDisappear {
+                    // Per-window monitor: stop it when the window closes so
+                    // duplicate monitors don't double-fire after Cmd+N reopens.
+                    monitor?.stop()
+                    monitor = nil
+                }
         }
     }
 }

@@ -49,6 +49,24 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(session.isEmpty)
     }
 
+    func testRemoveBeforeCurrentShiftsIndex() {
+        let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"]))
+        session.setIndex(2)   // current = c
+        session.remove([session.files[0], session.files[3]])   // remove a and d
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.currentIndex, 1)                // still on c
+        XCTAssertEqual(session.files[session.currentIndex].url.lastPathComponent, "c.cr2")
+    }
+
+    func testRemoveBeforeCurrentKeepsPosition() {
+        let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.setIndex(1)   // current = b
+        session.remove([session.files[0]])   // remove a
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.currentIndex, 0)                // still on b
+        XCTAssertEqual(session.files[session.currentIndex].url.lastPathComponent, "b.cr2")
+    }
+
     func testFlaggedFilesReturnsInOrder() {
         let session = Session(files: makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
         session.toggleFlag()

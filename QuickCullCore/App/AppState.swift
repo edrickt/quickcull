@@ -45,7 +45,16 @@ public final class AppState {
     public func importFiles(urls: [URL]) {
         let unique = Array(Set(urls.map(\.standardizedFileURL))).sorted { $0.path < $1.path }
         let supported = unique.filter(RawFileIdentity.isSupported)
-        guard !supported.isEmpty else { return }
+        guard !supported.isEmpty else {
+            // Nothing importable: surface the unsupported selection in the
+            // empty-state banner instead of silently ignoring it.
+            importFailures = unique.map {
+                DecodeOutcome(file: SessionFile(url: $0),
+                              error: .cannotOpen("Unsupported format"))
+            }
+            phase = .empty
+            return
+        }
 
         let files = supported.map(SessionFile.init)
         session = Session(files: files)
@@ -62,7 +71,25 @@ public final class AppState {
                     phase = .decoding(completed: completed, total: total)
                 case .completed(let outcomes):
                     importFailures = outcomes.filter { $0.error != nil }
-                    finishDecoding(files: files)
+                    let failed = outcomes.filter { $0.error != nil }.map(\.file)
+                    if !failed.isEmpty {
+                        // Spec: the session proceeds without the failed files.
+                        // Flags are empty at this point, so remove() only
+                        // drops the files (and shifts the index correctly).
+                        session?.remove(failed)
+                    }
+                    if session?.isEmpty == true {
+                        // All failed: back to the empty state; its banner
+                        // surfaces the failures.
+                        session = nil
+                        thumbWindow = nil
+                        displayImages = nil
+                        phase = .empty
+                    } else if let session {
+                        // Loaders index into the files array, so it must be
+                        // the post-removal list.
+                        finishDecoding(files: session.files)
+                    }
                 }
             }
         }
