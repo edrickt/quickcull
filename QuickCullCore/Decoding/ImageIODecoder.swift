@@ -22,7 +22,7 @@ public final class ImageIODecoder: RawDecoding {
         }
 
         // Full-resolution decode; the thumbnail API with transform bakes the
-        // EXIF orientation into the pixels (mirrors AppState.loadJPEG).
+        // EXIF orientation into the pixels (mirrors ImageWindow.loadJPEG).
         let maxPixel = max(width, height)
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,

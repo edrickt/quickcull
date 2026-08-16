@@ -132,7 +132,9 @@ final class AppStateTests: XCTestCase {
     func testCommitSetsCommittingState() async throws {
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let gate = DispatchSemaphore(value: 0)
         let trasher = StubTrasher()
+        trasher.gate = gate
         let state = makeState(trasher: trasher)
         state.importFiles(urls: [a, b])
         await waitForScrubbing(state)
@@ -140,7 +142,18 @@ final class AppStateTests: XCTestCase {
         state.handle(.toggleFlag)
         state.requestCommit()
         XCTAssertFalse(state.isCommitting)
-        await state.confirmCommit()
+
+        let commit = Task { await state.confirmCommit() }
+        // The trasher is gated: the commit must be stuck in flight now.
+        var observedInFlight = false
+        for _ in 0..<100 {
+            if state.isCommitting { observedInFlight = true; break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertTrue(observedInFlight,
+                      "isCommitting must be true while the trash move is in flight")
+        gate.signal()
+        await commit.value
         XCTAssertFalse(state.isCommitting)
         XCTAssertEqual(state.session?.count, 1)
         XCTAssertEqual(trasher.trashed.count, 1)

@@ -91,16 +91,29 @@ final class SlowStubDecoder: RawDecoding, @unchecked Sendable {
 }
 
 /// Deterministic fake trasher: fails for a designated set of file ids,
-/// records everything it trashed.
+/// records everything it trashed. Can gate on a semaphore so a commit can be
+/// held in flight (thread-safe).
 final class StubTrasher: Trashing, @unchecked Sendable {
     var failIDs: Set<String> = []
-    private(set) var trashed: [String] = []
+    /// When set, `trash(url:)` waits on this semaphore before recording the
+    /// call — lets tests hold a commit in flight.
+    var gate: DispatchSemaphore?
+    private let lock = NSLock()
+    private var _trashed: [String] = []
+
+    var trashed: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return _trashed
+    }
 
     func trash(url: URL) throws {
+        gate?.wait()
         let id = RawFileIdentity.fileID(for: url)
         if failIDs.contains(id) {
-            throw NSError(domain: "stub", code: 1, userInfo: [NSLocalizedDescriptionKey: "volume without trash"])
+            throw NSError(domain: "stub", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "volume without trash"])
         }
-        trashed.append(id)
+        lock.lock(); defer { lock.unlock() }
+        _trashed.append(id)
     }
 }

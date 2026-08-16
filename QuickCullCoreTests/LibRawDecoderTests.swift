@@ -42,7 +42,7 @@ final class LibRawDecoderTests: XCTestCase {
     /// End-to-end orientation check: dcraw_process already rotates the raw
     /// (olympus decodes to 1926x2576 upright portrait with flip=5), so the
     /// cached JPEG must carry no orientation tag — loading it the way
-    /// AppState.loadJPEG does (thumbnail + transform) must NOT rotate again.
+    /// ImageWindow.loadJPEG does (thumbnail + transform) must NOT rotate again.
     func testOrientedRawStaysUprightThroughCacheRoundTrip() async throws {
         let url = fixture("olympus_c5050z", "orf")
         let bitmap = try decoder.decodeRaw(at: url)

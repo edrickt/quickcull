@@ -85,6 +85,10 @@ final class DecodeEngineTests: XCTestCase {
         XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 2, physicalMemoryBytes: 8 * gb, limit: nil), 2)
         XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: 2), 2)
         XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: 0), 1)
+        // Load-bearing floor: a <2 GB machine must still get at least one
+        // worker, or decodeAll would emit `.completed([])` (fake success).
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 1 * gb, limit: nil), 1)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 512 * 1024 * 1024, limit: nil), 1)
     }
 
     func testCancellationStopsWorkers() async throws {
