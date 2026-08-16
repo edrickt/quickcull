@@ -114,8 +114,16 @@ final class DecodeEngineTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 150_000_000)
         consumer.cancel()
         _ = await consumer.value
-        // Workers stop early: far fewer than 20 files decoded.
-        XCTAssertLessThan(decoder.callCount(), 20, "cancellation must stop the worker pool")
+        // Let in-flight decodes (≤ workerLimit × delay) settle, then sample
+        // twice: the first sample sanity-checks early stopping, the second
+        // proves the pool is truly stopped (a removed cancel check would let
+        // the count keep growing here).
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let settled = decoder.callCount()
+        XCTAssertLessThan(settled, 20, "cancellation must stop the worker pool")
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(decoder.callCount(), settled,
+                       "cancellation must stop the worker pool")
     }
 
     func testRealDecoderIntegrationWithFixtures() async throws {

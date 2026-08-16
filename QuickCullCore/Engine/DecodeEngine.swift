@@ -11,8 +11,9 @@ public struct DecodeOutcome: Equatable {
 }
 
 /// Phase 1: decode every file to a cached full-res q75 JPEG in parallel,
-/// bounded by the number of performance cores. Emits strictly monotonic
-/// progress events, then exactly one completed event with per-file outcomes.
+/// bounded by the memory-aware worker rule (one worker per 2 GB of RAM,
+/// capped by core count). Emits strictly monotonic progress events, then
+/// exactly one completed event with per-file outcomes.
 public actor DecodeEngine {
     public enum Event {
         case progress(completed: Int, total: Int)
