@@ -1552,7 +1552,13 @@ public final class Session {
 
     public var count: Int { files.count }
     public var isEmpty: Bool { files.isEmpty }
-    public var currentFile: SessionFile { files[currentIndex] }
+
+    /// Precondition: `files` is not empty (the scrubbing phase guarantees
+    /// this; commit transitions away from an empty session).
+    public var currentFile: SessionFile {
+        assert(!files.isEmpty, "currentFile requires a non-empty session")
+        return files[currentIndex]
+    }
 
     public func move(by delta: Int) {
         guard !files.isEmpty else { return }
