@@ -3,6 +3,11 @@ import QuickCullCore
 
 struct FilmstripView: View {
     @Environment(AppState.self) private var appState
+    /// Last time the strip scrolled. Used to skip the scroll animation while
+    /// the user is scrubbing rapidly: an animated scroll (~0.25 s) can't
+    /// keep up with key repeat (~50-150 ms), so every new animation restarts
+    /// mid-flight and the strip permanently trails the active index.
+    @State private var lastScrollAt = Date.distantPast
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -29,7 +34,17 @@ struct FilmstripView: View {
                 guard let session = appState.session,
                       session.files.indices.contains(session.currentIndex) else { return }
                 let currentID = session.files[session.currentIndex].id
-                withAnimation(.snappy) { proxy.scrollTo(currentID, anchor: .center) }
+                let now = Date()
+                let scrubbing = now.timeIntervalSince(lastScrollAt) < 0.15
+                lastScrollAt = now
+                if scrubbing {
+                    // Rapid succession (key repeat): jump instantly so the
+                    // center cell is always the active one.
+                    proxy.scrollTo(currentID, anchor: .center)
+                } else {
+                    // Deliberate step/jump after a pause: smooth glide.
+                    withAnimation(.snappy) { proxy.scrollTo(currentID, anchor: .center) }
+                }
             }
         }
     }
