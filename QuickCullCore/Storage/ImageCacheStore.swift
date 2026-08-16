@@ -32,11 +32,16 @@ public actor ImageCacheStore {
     }
 
     /// Cache key: SHA256 of "<standardized path>|<size>|<mtime-us>".
+    /// When the source file cannot be stat-ed (deleted mid-session, or a
+    /// synthetic/test file), falls back to the path-only key so the decoded
+    /// bitmap can still be cached deterministically.
     public func cacheURL(for file: SessionFile) throws -> URL {
-        let attrs = try FileManager.default.attributesOfItem(atPath: file.url.path)
-        let size = (attrs[.size] as? UInt64) ?? 0
-        let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let key = "\(file.id)|\(size)|\(Int(mtime * 1_000_000))"
+        var key = file.id
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: file.url.path) {
+            let size = (attrs[.size] as? UInt64) ?? 0
+            let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            key = "\(file.id)|\(size)|\(Int(mtime * 1_000_000))"
+        }
         let digest = SHA256.hash(data: Data(key.utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()
         return baseURL.appendingPathComponent(hex + ".jpg")
