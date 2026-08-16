@@ -12,18 +12,16 @@ struct ImageDisplayView: View {
                 Image(decorative: image, scale: 1)
                     .resizable()
                     .scaledToFit()
+                    .overlay(alignment: .topTrailing) {
+                        // Pinned to the image's own corner so it follows the
+                        // image bounds even when letterboxed.
+                        if let file = appState.session?.files[index],
+                           appState.session?.isFlagged(file) == true {
+                            FlagBadge(size: 44)
+                        }
+                    }
             } else {
                 ProgressView().controlSize(.large)
-            }
-            if let file = appState.session?.files[index],
-               appState.session?.isFlagged(file) == true {
-                VStack {
-                    HStack {
-                        Spacer()
-                        FlagBadge().padding(12)
-                    }
-                    Spacer()
-                }
             }
         }
     }

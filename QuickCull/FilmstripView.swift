@@ -41,7 +41,7 @@ struct ThumbnailCell: View {
             }
             if let file = appState.session?.files[index],
                appState.session?.isFlagged(file) == true {
-                FlagBadge()
+                FlagBadge(size: 24)
             }
         }
         .frame(width: 100, height: 64)

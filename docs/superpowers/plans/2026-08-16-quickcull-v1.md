@@ -3190,13 +3190,25 @@ struct ThumbnailCell: View {
 import SwiftUI
 
 struct FlagBadge: View {
+    var size: CGFloat = 32
+
     var body: some View {
-        Image(systemName: "xmark.circle.fill")
-            .font(.title2)
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(.white, .red)
-            .shadow(radius: 1)
-            .padding(2)
+        CornerTriangle()
+            .fill(.red)
+            .frame(width: size, height: size)
+            .shadow(color: .black.opacity(0.35), radius: 1.5, y: 0.5)
+    }
+}
+
+/// Right isosceles triangle covering the top-right corner of its frame.
+fileprivate struct CornerTriangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 ```
