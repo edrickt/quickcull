@@ -2672,19 +2672,28 @@ public final class AppState {
 
     private func finishDecoding(files: [SessionFile]) {
         guard let session else { return }
-        thumbWindow = SlidingWindow(radius: 30, count: session.count) { [cache] index in
+        thumbWindow = SlidingWindow(radius: 30, count: session.count,
+                                    thumbnailLoader: makeThumbLoader(files: files))
+        displayImages = DisplayImageProvider(loader: makeDisplayLoader(files: files))
+        syncWindows()
+        phase = .scrubbing
+    }
+
+    private func makeThumbLoader(files: [SessionFile]) -> (Int) async -> CGImage? {
+        { [cache] index in
             guard index >= 0, index < files.count else { return nil }
             return Self.loadJPEG(at: try? await cache.cacheURL(for: files[index]),
                                  maxPixelSize: 320)
         }
-        let displayPixels = Self.displayPixelLimit()
-        displayImages = DisplayImageProvider { [cache] index in
+    }
+
+    private func makeDisplayLoader(files: [SessionFile]) -> (Int) async -> CGImage? {
+        let pixels = Self.displayPixelLimit()
+        return { [cache] index in
             guard index >= 0, index < files.count else { return nil }
             return Self.loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                                 maxPixelSize: displayPixels)
+                                 maxPixelSize: pixels)
         }
-        syncWindows()
-        phase = .scrubbing
     }
 
     public func handle(_ action: CullAction) {
@@ -2742,16 +2751,9 @@ public final class AppState {
         thumbWindow = nil
         displayImages = nil
         if let session, !session.isEmpty {
-            thumbWindow = SlidingWindow(radius: 30, count: session.count) { [cache, files = session.files] index in
-                guard index >= 0, index < files.count else { return nil }
-                return Self.loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                                     maxPixelSize: 320)
-            }
-            displayImages = DisplayImageProvider { [cache, files = session.files] index in
-                guard index >= 0, index < files.count else { return nil }
-                return Self.loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                                     maxPixelSize: Self.displayPixelLimit())
-            }
+            thumbWindow = SlidingWindow(radius: 30, count: session.count,
+                                        thumbnailLoader: makeThumbLoader(files: session.files))
+            displayImages = DisplayImageProvider(loader: makeDisplayLoader(files: session.files))
             syncWindows()
         }
     }
