@@ -20,13 +20,16 @@ done
 pkill -x QuickCull >/dev/null 2>&1 || true
 
 echo "Building QuickCull (Release)…"
-EXTRA_FLAGS=()
+# Extra Swift frontend flags for sandboxed environments (e.g. the DSH
+# harness, where swift-plugin-server's nested sandbox-exec is denied).
+# Always expanded as a single quoted argument, so no bash-3.2 array traps.
+EXTRA_FLAGS=""
 if [ -n "${DSH_SESSION_ID:-}" ]; then
-    # swift-plugin-server's nested sandbox-exec is denied inside the harness.
-    EXTRA_FLAGS=(OTHER_SWIFT_FLAGS='$(inherited) -Xfrontend -disable-sandbox')
+    EXTRA_FLAGS=" -Xfrontend -disable-sandbox"
 fi
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCull -configuration Release \
-    -derivedDataPath Build/Release "${EXTRA_FLAGS[@]}" build
+    -derivedDataPath Build/Release \
+    OTHER_SWIFT_FLAGS='$(inherited)'"${EXTRA_FLAGS}" build
 
 echo "Launching QuickCull…"
 open "$APP"
