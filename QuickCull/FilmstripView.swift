@@ -23,9 +23,13 @@ struct FilmstripView: View {
             .frame(height: 86)
             .background(.thinMaterial)
             .onChange(of: appState.session?.currentIndex) {
-                if let current = appState.session?.currentIndex {
-                    withAnimation(.snappy) { proxy.scrollTo(current, anchor: .center) }
-                }
+                // scrollTo must target the ForEach's identity (the file id),
+                // not the integer index: cells are keyed by file id so a
+                // commit-shrunk session can't re-render a stale index (crash).
+                guard let session = appState.session,
+                      session.files.indices.contains(session.currentIndex) else { return }
+                let currentID = session.files[session.currentIndex].id
+                withAnimation(.snappy) { proxy.scrollTo(currentID, anchor: .center) }
             }
         }
     }
