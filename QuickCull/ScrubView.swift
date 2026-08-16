@@ -8,6 +8,9 @@ struct ScrubView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !appState.importFailures.isEmpty {
+                importFailuresBanner
+            }
             ImageDisplayView()
             Divider()
             FilmstripView()
@@ -39,5 +42,34 @@ struct ScrubView: View {
         .onChange(of: appState.commitFailures.count) {
             if appState.commitFailures.count > 0 { showCommitFailures = true }
         }
+    }
+
+    /// Import failures are set before the decoding → scrubbing transition,
+    /// so they are surfaced here (DecodingView can never render them).
+    private var importFailuresBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            Text(importFailureSummary)
+                .font(.caption)
+                .lineLimit(1)
+            Spacer()
+            Button("Dismiss") { appState.dismissImportFailures() }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.yellow.opacity(0.15))
+    }
+
+    private var importFailureSummary: String {
+        let names = appState.importFailures
+            .prefix(3)
+            .map { $0.file.url.lastPathComponent }
+            .joined(separator: ", ")
+        let count = appState.importFailures.count
+        return count > 3
+            ? "\(count) file(s) could not be decoded: \(names) …"
+            : "\(count) file(s) could not be decoded: \(names)"
     }
 }

@@ -13,17 +13,6 @@ struct DecodingView: View {
                 Text("Decoding \(completed) of \(total)…")
                     .monospacedDigit()
             }
-            if !appState.importFailures.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(appState.importFailures.count) file(s) could not be decoded:")
-                        .font(.headline)
-                    List(appState.importFailures, id: \.file.id) { outcome in
-                        Text("\(outcome.file.url.lastPathComponent) — \(outcome.error.map(String.init(describing:)) ?? "")")
-                            .font(.caption)
-                    }
-                    .frame(maxHeight: 200)
-                }
-            }
         }
         .padding(40)
     }

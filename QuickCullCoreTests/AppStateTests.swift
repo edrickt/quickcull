@@ -24,8 +24,9 @@ final class AppStateTests: XCTestCase {
         return url
     }
 
-    private func makeState(trasher: Trashing = StubTrasher()) -> AppState {
-        AppState(decoder: StubDecoder(), cache: cache, trasher: trasher)
+    private func makeState(decoder: RawDecoding = StubDecoder(),
+                           trasher: Trashing = StubTrasher()) -> AppState {
+        AppState(decoder: decoder, cache: cache, trasher: trasher)
     }
 
     private func waitForScrubbing(_ state: AppState) async {
@@ -126,5 +127,21 @@ final class AppStateTests: XCTestCase {
         state.confirmCommit()
         XCTAssertNil(state.session)
         XCTAssertEqual(state.phase, .empty)
+    }
+
+    func testImportFailuresSurviveIntoScrubbing() async throws {
+        let ok = try makeRaw("ok.cr2")
+        let bad = try makeRaw("bad.cr2")
+        let state = makeState(decoder: StubDecoder(failIDs: [bad.path]))
+        state.importFiles(urls: [ok, bad])
+        await waitForScrubbing(state)
+
+        // Phase flips to scrubbing in the same turn that records failures;
+        // the scrub phase must still see them (DecodingView never renders).
+        XCTAssertEqual(state.phase, .scrubbing)
+        XCTAssertEqual(state.importFailures.count, 1)
+
+        state.dismissImportFailures()
+        XCTAssertTrue(state.importFailures.isEmpty)
     }
 }

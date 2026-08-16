@@ -77,6 +77,13 @@ public final class AppState {
         phase = .scrubbing
     }
 
+    /// Dismisses the import-failure banner once the user has seen it.
+    /// Failures persist past the decoding → scrubbing transition so the
+    /// scrub phase can surface them; this clears them.
+    public func dismissImportFailures() {
+        importFailures = []
+    }
+
     private func makeThumbLoader(files: [SessionFile]) -> (Int) async -> CGImage? {
         { [cache] index in
             guard index >= 0, index < files.count else { return nil }
