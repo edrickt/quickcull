@@ -20,6 +20,15 @@ struct ImageDisplayView: View {
                             FlagBadge(size: 44)
                         }
                     }
+            } else if let thumb = appState.thumbWindow?.image(at: index) {
+                // The display-size decode (~100-400 ms for a 45 MP cache
+                // entry) lags fast scrubbing. Show the already-resident
+                // same-index thumbnail upscaled so the current photo is
+                // visible immediately; the sharp image replaces it when the
+                // decode lands. Same index = same photo, never a wrong image.
+                Image(decorative: thumb, scale: 1)
+                    .resizable()
+                    .scaledToFit()
             } else {
                 ProgressView().controlSize(.large)
             }

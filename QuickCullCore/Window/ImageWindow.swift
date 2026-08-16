@@ -70,8 +70,12 @@ public final class ImageWindow {
     public static func thumbnails(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
         ImageWindow(radius: 30, count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
-            return loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                            maxPixelSize: 320)
+            let url = try? await cache.cacheURL(for: files[index])
+            // Decode off the main actor: even a small JPEG takes tens of ms,
+            // and scrubbing must never block the UI thread.
+            return await Task.detached(priority: .utility) {
+                loadJPEG(at: url, maxPixelSize: 320)
+            }.value
         }
     }
 
@@ -80,8 +84,12 @@ public final class ImageWindow {
         let pixels = displayPixelLimit()
         return ImageWindow(radius: 1, count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
-            return loadJPEG(at: try? await cache.cacheURL(for: files[index]),
-                            maxPixelSize: pixels)
+            let url = try? await cache.cacheURL(for: files[index])
+            // Downsampling a 45 MP cache entry takes ~100-400 ms; decode it
+            // off the main actor so the UI stays responsive while scrubbing.
+            return await Task.detached(priority: .userInitiated) {
+                loadJPEG(at: url, maxPixelSize: pixels)
+            }.value
         }
     }
 
@@ -90,8 +98,10 @@ public final class ImageWindow {
                 NSScreen.main?.frame.height ?? 1080) * 2)
     }
 
-    /// Downsamples a cached JPEG (thumbnail API = memory-bounded).
-    private static func loadJPEG(at url: URL?, maxPixelSize: Int) -> CGImage? {
+    /// Downsamples a cached JPEG (thumbnail API = memory-bounded). Decoding
+    /// is CPU-bound (tens to hundreds of ms for a 45 MP cache entry), so
+    /// callers run this off the main actor via a detached task.
+    nonisolated private static func loadJPEG(at url: URL?, maxPixelSize: Int) -> CGImage? {
         guard let url,
               let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let options: [CFString: Any] = [
