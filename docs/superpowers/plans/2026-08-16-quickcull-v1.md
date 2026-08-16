@@ -2532,8 +2532,9 @@ final class AppStateTests: XCTestCase {
         return url
     }
 
-    private func makeState(trasher: Trashing = StubTrasher()) -> AppState {
-        AppState(decoder: StubDecoder(), cache: cache, trasher: trasher)
+    private func makeState(decoder: RawDecoding = StubDecoder(),
+                           trasher: Trashing = StubTrasher()) -> AppState {
+        AppState(decoder: decoder, cache: cache, trasher: trasher)
     }
 
     private func waitForScrubbing(_ state: AppState) async {
@@ -2621,6 +2622,21 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.session?.count, 1)        // a stays
         XCTAssertEqual(state.session?.flaggedCount, 1) // a stays flagged
         XCTAssertEqual(state.commitFailures.count, 1)
+    }
+
+    func testImportFailuresSurviveIntoScrubbing() async throws {
+        let ok = try makeRaw("ok.cr2")
+        let bad = try makeRaw("bad.cr2")
+        let state = makeState(decoder: StubDecoder(failIDs: [bad.path]))
+        state.importFiles(urls: [ok, bad])
+        await waitForScrubbing(state)
+
+        // Phase flips to scrubbing in the same turn that records failures;
+        // the scrub phase must still see them (DecodingView never renders).
+        XCTAssertEqual(state.phase, .scrubbing)
+        XCTAssertEqual(state.importFailures.count, 1)
+        state.dismissImportFailures()
+        XCTAssertTrue(state.importFailures.isEmpty)
     }
 
     func testCommitOfEverythingReturnsToEmptyState() async throws {
@@ -2795,6 +2811,12 @@ public final class AppState {
         pendingCommitCount = 0
     }
 
+    /// Failures persist past the decoding → scrubbing transition so the
+    /// scrub phase can surface them; this clears them.
+    public func dismissImportFailures() {
+        importFailures = []
+    }
+
     private func rebuildWindows() {
         thumbWindow = nil
         displayImages = nil
@@ -2934,17 +2956,6 @@ struct DecodingView: View {
                 Text("Decoding \(completed) of \(total)…")
                     .monospacedDigit()
             }
-            if !appState.importFailures.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(appState.importFailures.count) file(s) could not be decoded:")
-                        .font(.headline)
-                    List(appState.importFailures, id: \.file.id) { outcome in
-                        Text("\(outcome.file.url.lastPathComponent) — \(outcome.error.map(String.init(describing:)) ?? "")")
-                            .font(.caption)
-                    }
-                    .frame(maxHeight: 200)
-                }
-            }
         }
         .padding(40)
     }
@@ -2963,6 +2974,9 @@ struct ScrubView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !appState.importFailures.isEmpty {
+                importFailuresBanner
+            }
             ImageDisplayView()
             Divider()
             FilmstripView()
@@ -2994,6 +3008,35 @@ struct ScrubView: View {
         .onChange(of: appState.commitFailures.count) {
             if appState.commitFailures.count > 0 { showCommitFailures = true }
         }
+    }
+
+    /// Import failures are set before the decoding → scrubbing transition,
+    /// so they are surfaced here (DecodingView can never render them).
+    private var importFailuresBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            Text(importFailureSummary)
+                .font(.caption)
+                .lineLimit(1)
+            Spacer()
+            Button("Dismiss") { appState.dismissImportFailures() }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.yellow.opacity(0.15))
+    }
+
+    private var importFailureSummary: String {
+        let names = appState.importFailures
+            .prefix(3)
+            .map { $0.file.url.lastPathComponent }
+            .joined(separator: ", ")
+        let count = appState.importFailures.count
+        return count > 3
+            ? "\(count) file(s) could not be decoded: \(names) …"
+            : "\(count) file(s) could not be decoded: \(names)"
     }
 }
 ```
