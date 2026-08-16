@@ -1,9 +1,12 @@
 import Foundation
+import Observation
 
 /// Per-session culling state. Flags live only in memory and are discarded
 /// when a new session starts. Commit removes trashed files; scrubbing
-/// continues on the remainder.
+/// continues on the remainder. @Observable so the UI re-renders on index
+/// and flag changes (filmstrip highlight, auto-scroll, badges).
 @MainActor
+@Observable
 public final class Session {
     public private(set) var files: [SessionFile]
     public private(set) var currentIndex: Int = 0

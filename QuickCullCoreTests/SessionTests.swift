@@ -1,3 +1,4 @@
+import Observation
 import XCTest
 @testable import QuickCullCore
 
@@ -75,4 +76,36 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(session.flaggedFiles.map(\.id),
                        [session.files[0].id, session.files[1].id])
     }
+
+    func testCurrentIndexChangeIsObservable() async {
+        let session = Session(files: makeFiles(["a.cr2", "b.cr2"]))
+        var fired = false
+        withObservationTracking {
+            _ = session.currentIndex
+        } onChange: {
+            fired = true
+        }
+        session.move(by: 1)
+        // onChange is delivered on a later runloop turn.
+        for _ in 0..<10 where !fired {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(fired, "currentIndex change must fire observation (filmstrip border depends on it)")
+    }
+
+    func testFlagChangesAreObservable() async {
+        let session = Session(files: makeFiles(["a.cr2", "b.cr2"]))
+        var fired = false
+        withObservationTracking {
+            _ = session.isFlagged(session.files[0])
+        } onChange: {
+            fired = true
+        }
+        session.toggleFlag()
+        for _ in 0..<10 where !fired {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertTrue(fired, "flag changes must fire observation (badges depend on it)")
+    }
+
 }
