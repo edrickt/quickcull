@@ -203,6 +203,7 @@
 				B1000000000000000000000B /* Sources */,
 				B1000000000000000000000A /* Frameworks */,
 				B1000000000000000000000C /* Resources */,
+				C10000000000000000000008 /* Copy Test Fixtures */,
 			);
 			buildRules = (
 			);
@@ -287,6 +288,25 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		C10000000000000000000008 /* Copy Test Fixtures */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Test Fixtures";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "bash \"$PROJECT_DIR/Scripts/copy-test-fixtures.sh\"\n";
+		};
 		C10000000000000000000002 /* Build LibRaw */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
