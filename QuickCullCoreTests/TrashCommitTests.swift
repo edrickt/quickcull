@@ -1,19 +1,6 @@
 import XCTest
 @testable import QuickCullCore
 
-final class StubTrasher: Trashing {
-    var failIDs: Set<String> = []
-    private(set) var trashed: [String] = []
-
-    func trash(url: URL) throws {
-        let id = RawFileIdentity.fileID(for: url)
-        if failIDs.contains(id) {
-            throw NSError(domain: "stub", code: 1, userInfo: [NSLocalizedDescriptionKey: "volume without trash"])
-        }
-        trashed.append(id)
-    }
-}
-
 final class TrashCommitTests: XCTestCase {
     private func makeFiles(_ names: [String]) -> [SessionFile] {
         names.map { SessionFile(url: URL(fileURLWithPath: "/tmp/shoot/\($0)")) }
