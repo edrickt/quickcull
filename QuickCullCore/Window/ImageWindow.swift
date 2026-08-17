@@ -63,9 +63,6 @@ public final class ImageWindow {
             images.removeValue(forKey: i)
             inFlight.remove(i)
         }
-        // Load ensured indices not yet present (plus window, which setCurrent already queued but ensure we cover moved current)
-        let toLoad = (windowSet.union(ensuredIndices)).filter { images[$0] == nil && !inFlight.contains($0) }
-        _ = toLoad
         // But actually only queue the explicitly ensured indices; window already queued by setCurrent. So filter to ensured:
         for i in ensuredIndices where images[i] == nil && !inFlight.contains(i) {
             inFlight.insert(i)
