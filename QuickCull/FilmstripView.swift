@@ -27,8 +27,9 @@ struct FilmstripView: View {
         // attributed to the cell views, whose in-place updates can be
         // dropped by a preempted render pass (badges stuck absent while the
         // viewer updates). A parent-body read re-keys the whole strip on
-        // every change AND re-feeds the badge canvas, which redraws every
-        // badge in a single view from the final state.
+        // every change and feeds `isFlagged` into `BadgedThumbnailView`,
+        // which pins the badge to the image itself (not the placeholder
+        // container) via `FlagBadgeLogic.shouldShow`.
         let files = appState.session?.files ?? []
         let flagged = appState.session?.flagged ?? []
         let currentIndex = appState.session?.currentIndex ?? 0
@@ -45,30 +46,17 @@ struct FilmstripView: View {
         }
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                // The badges live in a single Canvas layered over the cells
-                // (not inside each cell): a per-cell conditional view's
-                // commit can be dropped by a preempted render pass under
-                // rapid flag toggling, leaving some badges stuck absent.
-                // One canvas view redraws ALL badges from the current data
-                // in a single commit — nothing to drop.
-                //
-                // A badge draws only for a cell that HAS its image: the
-                // badge belongs to the photo, never to the empty
-                // placeholder box it will land on.
-                ZStack(alignment: .topLeading) {
-                    LazyHStack(spacing: 3) {
-                        // Iterate the files themselves, keyed by stable file id.
-                        // Never ForEach(0..<count) with array subscripts in cells:
-                        // when a commit shrinks the session, lazy stacks can
-                        // re-render a surviving cell with a stale range index and
-                        // trap on files[index] (crash).
-                        ForEach(elements, id: \.key) { element in
-                            ThumbnailCell(index: element.index, file: element.file)
-                        }
+                LazyHStack(spacing: 3) {
+                    // Iterate the files themselves, keyed by stable file id.
+                    // Never ForEach(0..<count) with array subscripts in cells:
+                    // when a commit shrinks the session, lazy stacks can
+                    // re-render a surviving cell with a stale range index and
+                    // trap on files[index] (crash).
+                    ForEach(elements, id: \.key) { element in
+                        ThumbnailCell(index: element.index, file: element.file, isFlagged: element.isFlagged)
                     }
-                    .padding(6)
-                    FlagBadgeCanvas(elements: elements)
                 }
+                .padding(6)
             }
             .frame(height: 86)
             .background(.thinMaterial)
@@ -98,61 +86,19 @@ struct FilmstripView: View {
     }
 }
 
-/// Draws every reject-flag badge for the strip in ONE view.
-///
-/// One Canvas = one render commit per state change, so a badge can never
-/// be left stale by a partially-applied update. It sits inside the scroll
-/// content, layered over the cells, so it scrolls with them. Badge
-/// positions mirror the cell layout (100 pt cells, 3 pt spacing, 6 pt
-/// padding, 24 pt badge in each cell's top-right corner).
-private struct FlagBadgeCanvas: View {
-    let elements: [(key: String, index: Int, file: SessionFile, isFlagged: Bool, hasImage: Bool)]
-
-    var body: some View {
-        Canvas { context, size in
-            // Single source of truth: `FlagBadgeLogic.shouldShow` — badge belongs to photo, never placeholder (cb13898 regression)
-            for element in elements where FlagBadgeLogic.shouldShow(isFlagged: element.isFlagged, hasImage: element.hasImage) {
-                let x = CGFloat(6 + element.index * 103 + 76)
-                let y = CGFloat(6)
-                let rect = CGRect(x: x, y: y, width: 24, height: 24)
-                // Subtle shadow, mirroring FlagBadge.
-                var shadow = context
-                shadow.translateBy(x: 0, y: 0.5)
-                shadow.fill(trianglePath(in: rect), with: .color(.black.opacity(0.35)))
-                context.fill(trianglePath(in: rect), with: .color(.red))
-            }
-        }
-    }
-
-    /// Right isosceles triangle covering the top-right corner (same shape
-    /// as the view's CornerTriangle).
-    private func trianglePath(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.closeSubpath()
-        return path
-    }
-}
-
 struct ThumbnailCell: View {
     let index: Int
     let file: SessionFile
+    let isFlagged: Bool
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            if let image = appState.thumbWindow?.image(at: index) {
-                Image(decorative: image, scale: 2)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Rectangle().fill(.quaternary)
-            }
-        }
-        .frame(width: 100, height: 64)
-        .clipped()
+        BadgedThumbnailView(
+            image: appState.thumbWindow?.image(at: index),
+            isFlagged: isFlagged,
+            size: CGSize(width: 100, height: 64),
+            badgeSize: 24
+        )
         .overlay(
             Rectangle().strokeBorder(
                 index == appState.session?.currentIndex ? Color.accentColor : .clear,
