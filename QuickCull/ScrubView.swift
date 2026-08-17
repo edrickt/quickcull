@@ -53,6 +53,7 @@ struct ScrubView: View {
                     set: { appState.setViewMode($0) }
                 )) {
                     Text("Single").tag(AppState.ViewMode.scrub)
+                    Text("Split").tag(AppState.ViewMode.split)
                     Text("Grid").tag(AppState.ViewMode.grid)
                 }.pickerStyle(.segmented).fontWeight(.light).disabled(appState.isCommitting)
             }
