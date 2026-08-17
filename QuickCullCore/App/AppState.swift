@@ -151,7 +151,8 @@ public final class AppState {
 
     /// Switches the visible sequence to `filter` and rebuilds both image
     /// windows over the new projection (same path commit uses). No-op
-    /// outside the scrubbing phase.
+    /// outside the scrubbing phase, and when `filter` is already active
+    /// (the windows already cover that projection).
     public func setFilter(_ filter: CullFilter) {
         guard let session, phase == .scrubbing else { return }
         guard session.filter != filter else { return }
