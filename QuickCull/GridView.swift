@@ -39,18 +39,21 @@ struct GridView: View {
                             image: element.image
                         )
                         .onAppear { appState.thumbWindow?.ensureLoaded(indices: [element.index]) }
-                        .onTapGesture(count: 1) {
+                        .onTapGesture {
 #if canImport(AppKit)
-                            let flags = NSEvent.modifierFlags
-                            appState.handleGridTap(id: element.file.id,
-                                                   isCmd: flags.contains(.command),
-                                                   isShift: flags.contains(.shift))
+                            let event = NSApp.currentEvent
+                            let clickCount = event?.clickCount ?? 1
+                            if clickCount == 2 {
+                                appState.handleGridDoubleClick(id: element.file.id)
+                            } else {
+                                let flags = event?.modifierFlags ?? NSEvent.modifierFlags
+                                appState.handleGridTap(id: element.file.id,
+                                                       isCmd: flags.contains(.command),
+                                                       isShift: flags.contains(.shift))
+                            }
 #else
                             appState.handleGridTap(id: element.file.id, isCmd: false, isShift: false)
 #endif
-                        }
-                        .onTapGesture(count: 2) {
-                            appState.handleGridDoubleClick(id: element.file.id)
                         }
                         .accessibilityLabel(element.file.url.lastPathComponent)
                         .accessibilityAddTraits(element.isSelected ? .isSelected : [])
