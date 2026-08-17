@@ -13,10 +13,12 @@ struct GridView: View {
     var body: some View {
         // Parent-body reads: avoid per-cell observation that makes LazyVGrid re-evaluate 500 cells on every gridSelection change.
         // Mirrors FilmstripView's stripKey/elements pattern for fast scrub.
+        // Grid uses its own all-thumbs window (no sliding window): gridThumbs loads every thumbnail and never evicts on scroll,
+        // unlike the strip's thumbWindow (radius 30) which unloads off-window cells.
         let files = appState.session?.files ?? []
         let gridSelection = appState.gridSelection
         let flagged = appState.session?.flagged ?? Set<String>()
-        let thumbImages = appState.thumbWindow?.images ?? [:]
+        let thumbImages = appState.gridThumbs?.images ?? [:]
         if files.isEmpty {
             ZStack { Color.black; Text("No photos in this filter").foregroundStyle(.secondary) }
         } else {
@@ -38,7 +40,7 @@ struct GridView: View {
                             isFlagged: element.isFlagged,
                             image: element.image
                         )
-                        .task(id: element.index) { appState.thumbWindow?.ensureLoaded(indices: [element.index]) }
+                        .task(id: element.index) { appState.gridThumbs?.ensureLoaded(indices: [element.index]) }
                         .onTapGesture {
 #if canImport(AppKit)
                             let event = NSApp.currentEvent

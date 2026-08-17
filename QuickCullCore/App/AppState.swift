@@ -26,6 +26,7 @@ public final class AppState {
     public private(set) var isCommitting: Bool = false
 
     public private(set) var thumbWindow: ImageWindow?
+    public private(set) var gridThumbs: ImageWindow?
     public private(set) var displayImages: ImageWindow?
 
     public let cache: ImageCacheStore
@@ -101,6 +102,7 @@ public final class AppState {
                         // surfaces the failures.
                         session = nil
                         thumbWindow = nil
+                        gridThumbs = nil
                         displayImages = nil
                         phase = .empty
                         viewMode = .scrub
@@ -121,8 +123,11 @@ public final class AppState {
 
     private func installWindows(for files: [SessionFile]) {
         thumbWindow = ImageWindow.thumbnails(files: files, cache: cache)
+        gridThumbs = ImageWindow.gridThumbnails(files: files, cache: cache)
         displayImages = ImageWindow.display(files: files, cache: cache)
         syncWindows()
+        // Prime grid window: load all thumbs (window is all, so one sync is enough)
+        gridThumbs?.setCurrent(0)
     }
 
     /// Dismisses the import-failure banner once the user has seen it.
@@ -261,6 +266,7 @@ public final class AppState {
         if session.isEmpty {
             self.session = nil
             thumbWindow = nil
+            gridThumbs = nil
             displayImages = nil
             phase = .empty
             viewMode = .scrub

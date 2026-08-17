@@ -155,6 +155,22 @@ public final class ImageWindow {
         }
     }
 
+    /// Grid window: all thumbnails (no sliding window). Used only by GridView;
+    /// strip stays bounded (radius 30) for memory. Grid needs stable thumbs
+    /// while scrolling — evicting on scroll would unload visible cells.
+    public static func gridThumbnails(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
+        // radius >= count makes window = all indices, so the window never
+        // evicts and ensureLoaded's LRU is not used. Fill with all thumbs
+        // up to count, bounded by count (full grid).
+        ImageWindow(radius: files.count, count: files.count) { [cache] index in
+            guard index >= 0, index < files.count else { return nil }
+            let url = try? await cache.cacheURL(for: files[index])
+            return await Task.detached(priority: .utility) {
+                loadJPEG(at: url, maxPixelSize: 320)
+            }.value
+        }
+    }
+
     /// Main-viewer window: radius 1, display size (2× screen long edge).
     public static func display(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
         let pixels = displayPixelLimit()
