@@ -104,4 +104,62 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(fired, "flag changes must fire observation (badges depend on it)")
     }
 
+    // MARK: Filter
+
+    func testDefaultFilterIsAll() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
+        XCTAssertEqual(session.filter, .all)
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.totalCount, 2)
+    }
+
+    func testFlaggedFilterProjectsFlaggedOnly() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.toggleFlag()              // flag a
+        session.move(by: 2)
+        session.toggleFlag()              // flag c
+        session.setFilter(.flagged)
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.files.map(\.url.lastPathComponent), ["a.cr2", "c.cr2"])
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")   // current kept
+    }
+
+    func testKeepersFilterProjectsUnflagged() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.toggleFlag()              // flag a
+        session.setFilter(.keepers)       // a no longer matches
+        XCTAssertEqual(session.files.map(\.url.lastPathComponent), ["b.cr2", "c.cr2"])
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "b.cr2")   // nearest match
+    }
+
+    func testFilterJumpTieResolvesForward() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"]))
+        session.setIndex(2)               // current = c
+        session.toggleFlag()              // flag c, so keepers excludes it
+        session.setFilter(.keepers)       // b and d are equidistant
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "d.cr2")
+    }
+
+    func testFilterJumpPrefersNearestBackward() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2", "e.cr2"]))
+        session.setIndex(2)               // current = c
+        session.toggleFlag()              // flag c
+        session.move(by: 1)
+        session.toggleFlag()              // flag d
+        session.setIndex(2)               // current = c again
+        session.setFilter(.keepers)       // b is nearer than e
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "b.cr2")
+        session.setFilter(.flagged)       // back to flagged: c, current by id
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
+    }
+
+    func testFilterMatchingNothingResetsToAll() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
+        session.setFilter(.flagged)       // nothing is flagged
+        XCTAssertEqual(session.filter, .all)
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "a.cr2")
+    }
+
 }
