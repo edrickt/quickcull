@@ -29,7 +29,8 @@ public final class ImageWindow {
     public func setCurrent(_ index: Int) {
         currentIndex = min(max(index, 0), max(count - 1, 0))
         let policy = WindowPolicy(radius: radius)
-        let keep = Set(policy.window(around: currentIndex, count: count)).union(ensuredIndices)
+        let windowSet = Set(policy.window(around: currentIndex, count: count))
+        let keep = windowSet.union(ensuredIndices)
         for i in Set(images.keys) where !keep.contains(i) {
             images.removeValue(forKey: i)
             inFlight.remove(i)
@@ -45,17 +46,33 @@ public final class ImageWindow {
                 if let image { self.images[i] = image }
             }
         }
-        // images.count may now exceed 2*radius+1 due to ensured grid cells; cap assertion relaxed for grid
-        // assert(images.count <= 2 * radius + 1, "window invariant violated")
+        // Prune ensuredIndices to keep set to avoid unbounded growth.
+        // Without this, ensuredIndices grows monotonically and retains 500 thumbs
+        // for 500 files (keep = window ∪ ensuredIndices), violating memory bounded
+        // viewport+61 invariant. Keep only window ∪ recently ensured viewport.
+        ensuredIndices = ensuredIndices.intersection(keep)
+        ensuredIndices = Set(ensuredIndices.filter { $0 >= 0 && $0 < count })
+        ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
+        // Further bound to viewport (~20-40) + window (61) with LRU eviction
+        pruneEnsuredIndices(windowSet: windowSet, recent: [])
     }
 
     private var ensuredIndices: Set<Int> = []
+    private var ensuredOrder: [Int] = [] // insertion order for LRU bounding
 
     public func ensureLoaded(indices: [Int]) {
         let policy = WindowPolicy(radius: radius)
         let windowSet = Set(policy.window(around: currentIndex, count: count))
-        for idx in indices where idx >= 0 && idx < count {
-            ensuredIndices.insert(idx)
+        let validNew = indices.filter { $0 >= 0 && $0 < count }
+        for idx in validNew {
+            if ensuredIndices.contains(idx) {
+                // Move to end to mark recent for LRU
+                ensuredOrder.removeAll { $0 == idx }
+                ensuredOrder.append(idx)
+            } else {
+                ensuredIndices.insert(idx)
+                ensuredOrder.append(idx)
+            }
         }
         // Evict anything outside window ∪ ensured
         let keep = windowSet.union(ensuredIndices)
@@ -63,7 +80,7 @@ public final class ImageWindow {
             images.removeValue(forKey: i)
             inFlight.remove(i)
         }
-        // But actually only queue the explicitly ensured indices; window already queued by setCurrent. So filter to ensured:
+        // Only queue the explicitly ensured indices; window already queued by setCurrent.
         for i in ensuredIndices where images[i] == nil && !inFlight.contains(i) {
             inFlight.insert(i)
             Task { [weak self] in
@@ -76,9 +93,38 @@ public final class ImageWindow {
                 if let image { self.images[i] = image }
             }
         }
-        // Also prune ensuredIndices that are now out of window and not recently re-ensured? Keep for simplicity; eviction already handles images.
-        // But to avoid unbounded ensuredIndices growth, intersect with count range:
+        // Prune ensuredIndices to keep set to keep memory bounded (viewport + 61).
+        ensuredIndices = ensuredIndices.intersection(keep)
         ensuredIndices = Set(ensuredIndices.filter { $0 >= 0 && $0 < count })
+        ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
+        pruneEnsuredIndices(windowSet: windowSet, recent: validNew)
+    }
+
+    /// LRU viewport bounding: keep only window + most recently ensured viewport (~40).
+    /// Ensures memory stays bounded to viewport (~20-40) + scrub window 61 even for 500+ files.
+    private func pruneEnsuredIndices(windowSet: Set<Int>, recent: [Int]) {
+        let maxViewport = 40
+        let cap = windowSet.count + maxViewport
+        guard ensuredIndices.count > cap else { return }
+        // Keep window plus the most recent maxViewport ensures (LRU).
+        // ensuredOrder is insertion/recency order; suffix holds most recent.
+        let recentToKeep = Set(ensuredOrder.suffix(maxViewport))
+        let keepSet = windowSet.union(recentToKeep).union(recent)
+        let toRemove = ensuredIndices.subtracting(keepSet)
+        for idx in toRemove {
+            ensuredIndices.remove(idx)
+        }
+        ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
+        // If still over cap (e.g., window 61 + 40 =101 but we have large window), trim oldest beyond window
+        if ensuredIndices.count > cap {
+            // Keep window + most recent viewport, drop oldest viewport entries
+            let keepCount = cap - windowSet.count
+            let viewportToKeep = Set(ensuredOrder.filter { !windowSet.contains($0) }.suffix(keepCount))
+            let finalKeep = windowSet.union(viewportToKeep).union(recentToKeep).union(recent)
+            let extraRemove = ensuredIndices.subtracting(finalKeep)
+            for idx in extraRemove { ensuredIndices.remove(idx) }
+            ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
+        }
     }
 
     public func image(at index: Int) -> CGImage? { images[index] }

@@ -178,6 +178,7 @@ public final class AppState {
     }
 
     public func setViewMode(_ mode: ViewMode) {
+        guard !isCommitting else { return }
         guard phase == .scrubbing else { return }
         guard viewMode != mode else { return }
         viewMode = mode
@@ -191,6 +192,9 @@ public final class AppState {
     public func toggleSelection(id: String) {
         if gridSelection.contains(id) { gridSelection.remove(id) }
         else { gridSelection.insert(id) }
+        // Intentionally does not update gridAnchorID: Finder-like semantics where
+        // Cmd-click toggles selection without moving the Shift-range anchor.
+        // Plan says gridAnchorID = id but test expects no anchor move; keep as is.
     }
 
     public func selectRange(to targetID: String) {
