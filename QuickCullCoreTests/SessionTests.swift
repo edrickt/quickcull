@@ -259,4 +259,63 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(session.currentFile.url.lastPathComponent, "b.cr2")
     }
 
+    // MARK: Batch flag (grid)
+
+    func testToggleFlagsSingleInAllMode() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        let changed = session.toggleFlags(ids: [session.files[1].id])
+        XCTAssertFalse(changed, "All mode never changes projection size")
+        XCTAssertEqual(session.count, 3)
+        XCTAssertTrue(session.isFlagged(session.files[1]))
+    }
+
+    func testToggleFlagsBatchInAllMode() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        let ids = Set([session.files[0].id, session.files[2].id])
+        let changed = session.toggleFlags(ids: ids)
+        XCTAssertFalse(changed)
+        XCTAssertEqual(session.flaggedCount, 2)
+        XCTAssertTrue(session.isFlagged(session.files[0]))
+        XCTAssertTrue(session.isFlagged(session.files[2]))
+    }
+
+    func testToggleFlagsBatchDropsOutInKeepersMode() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"]))
+        session.setFilter(.keepers) // [a,b,c,d] all keepers, current a
+        let ids = Set([session.files[0].id, session.files[1].id]) // flag a,b
+        let changed = session.toggleFlags(ids: ids)
+        XCTAssertTrue(changed)
+        XCTAssertEqual(session.files.map(\.url.lastPathComponent), ["c.cr2", "d.cr2"])
+        // current was a (now flagged, no longer keeper): nearest match is c (dropped forward)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
+    }
+
+    func testToggleFlagsEmptyProjectionFallsBackToAll() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
+        session.setFilter(.keepers) // both keepers
+        let ids = Set(session.files.map(\.id)) // flag everything
+        let changed = session.toggleFlags(ids: ids)
+        XCTAssertEqual(session.filter, .all)
+        XCTAssertEqual(session.count, 2)
+        XCTAssertTrue(changed)
+    }
+
+    func testToggleFlagsIgnoresUnknownIds() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
+        let changed = session.toggleFlags(ids: ["nope"])
+        XCTAssertFalse(changed)
+        XCTAssertEqual(session.flaggedCount, 0)
+    }
+
+    func testToggleFlagsKeepsCurrentWhenStillVisible() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.setIndex(1) // b current
+        session.setFilter(.keepers)
+        let ids = Set([session.files[2].id]) // flag c only, b stays keeper
+        let changed = session.toggleFlags(ids: ids)
+        XCTAssertTrue(changed) // projection shrank from 3 to 2
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "b.cr2")
+        XCTAssertEqual(session.currentIndex, 1)
+    }
+
 }

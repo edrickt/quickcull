@@ -136,6 +136,45 @@ public final class Session {
         return true
     }
 
+    /// Batch-toggles flags for the given ids (intersection with `allFiles`).
+    /// Recomputes the projection once. If the current photo is still visible
+    /// it stays current; otherwise the nearest match in full-list order takes
+    /// over (ties forward). An empty projection falls back to `.all` keeping
+    /// the previous current photo by id. Returns whether the projection
+    /// size changed or the filter fell back.
+    @discardableResult
+    public func toggleFlags(ids: Set<String>) -> Bool {
+        guard !allFiles.isEmpty, !ids.isEmpty else { return false }
+        let validIDs = ids.intersection(allFiles.map(\.id))
+        guard !validIDs.isEmpty else { return false }
+        let beforeCount = files.count
+        let beforeFilter = filter
+        let currentIDBefore = files.isEmpty ? nil : currentFile.id
+        for id in validIDs {
+            if flagged.contains(id) { flagged.remove(id) } else { flagged.insert(id) }
+        }
+        let newFiles = projection(for: filter)
+        if newFiles.isEmpty {
+            filter = .all
+            files = allFiles
+            if let cid = currentIDBefore, let idx = allFiles.firstIndex(where: { $0.id == cid }) {
+                currentIndex = idx
+            } else {
+                currentIndex = 0
+            }
+            return true
+        }
+        files = newFiles
+        if let cid = currentIDBefore, let idx = newFiles.firstIndex(where: { $0.id == cid }) {
+            currentIndex = idx
+        } else if let cid = currentIDBefore {
+            currentIndex = nearestMatchIndex(to: cid, in: newFiles)
+        } else {
+            currentIndex = 0
+        }
+        return files.count != beforeCount || filter != beforeFilter
+    }
+
     public func isFlagged(_ file: SessionFile) -> Bool {
         flagged.contains(file.id)
     }
