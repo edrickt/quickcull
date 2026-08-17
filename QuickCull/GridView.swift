@@ -38,7 +38,7 @@ struct GridView: View {
                             isFlagged: element.isFlagged,
                             image: element.image
                         )
-                        .onAppear { appState.thumbWindow?.ensureLoaded(indices: [element.index]) }
+                        .task(id: element.index) { appState.thumbWindow?.ensureLoaded(indices: [element.index]) }
                         .onTapGesture {
 #if canImport(AppKit)
                             let event = NSApp.currentEvent
