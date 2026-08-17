@@ -71,13 +71,23 @@ struct GridView: View {
 private struct GridCell: View {
     let index: Int; let file: SessionFile; let isSelected: Bool; let isFlagged: Bool; let image: CGImage?
     var body: some View {
-        BadgedThumbnailView(
-            image: image,
-            isFlagged: isFlagged,
-            size: CGSize(width: 160, height: 108),
-            badgeSize: 24
-        )
-        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2))
+        VStack(spacing: 4) {
+            BadgedThumbnailView(
+                image: image,
+                isFlagged: isFlagged,
+                size: CGSize(width: 160, height: 108),
+                badgeSize: 24
+            )
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2))
+            Text(file.url.lastPathComponent)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 160, alignment: .center)
+                .help(file.url.lastPathComponent)
+        }
         .contentShape(Rectangle())
+        .help(file.url.lastPathComponent)
     }
 }
