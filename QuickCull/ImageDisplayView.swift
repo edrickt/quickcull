@@ -42,13 +42,18 @@ struct ImageDisplayView: View {
 
 /// The reject-flag badge for the current photo, pinned to the image's own
 /// corner so it follows the image bounds even when letterboxed.
+/// Uses `FlagBadgeLogic.shouldShow` — badge belongs to photo, not container.
 private struct FlagBadgeOverlay: View {
     let file: SessionFile?
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        if let file, appState.session?.isFlagged(file) == true {
-            FlagBadge(size: 44)
+        if let file {
+            let isFlagged = appState.session?.isFlagged(file) == true
+            // hasImage is true here: overlay exists only on the Image branch (display or thumb), never on ProgressView
+            if FlagBadgeLogic.shouldShow(isFlagged: isFlagged, hasImage: true) {
+                FlagBadge(size: 44)
+            }
         }
     }
 }

@@ -49,24 +49,12 @@ private struct GridCell: View {
     let index: Int; let file: SessionFile; let isSelected: Bool; let isFlagged: Bool
     @Environment(AppState.self) private var appState
     var body: some View {
-        Group {
-            if let image = appState.thumbWindow?.image(at: index) {
-                Image(decorative: image, scale: 2)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 160, height: 108)
-                    .clipped()
-                    .overlay(alignment: .topTrailing) {
-                        if isFlagged {
-                            FlagBadge(size: 24).shadow(color: .black.opacity(0.35), radius: 1.5, y: 0.5)
-                        }
-                    }
-            } else {
-                Rectangle().fill(.quaternary).frame(width: 160, height: 108)
-            }
-        }
-        .frame(width: 160, height: 108)
-        .clipped()
+        BadgedThumbnailView(
+            image: appState.thumbWindow?.image(at: index),
+            isFlagged: isFlagged,
+            size: CGSize(width: 160, height: 108),
+            badgeSize: 24
+        )
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2))
         .contentShape(Rectangle())
     }

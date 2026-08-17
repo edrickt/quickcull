@@ -110,10 +110,8 @@ private struct FlagBadgeCanvas: View {
 
     var body: some View {
         Canvas { context, size in
-            // The badge belongs to the photo: draw it only for a flagged
-            // cell whose image has actually loaded, so it never sits on
-            // the empty placeholder box (the container).
-            for element in elements where element.isFlagged && element.hasImage {
+            // Single source of truth: `FlagBadgeLogic.shouldShow` — badge belongs to photo, never placeholder (cb13898 regression)
+            for element in elements where FlagBadgeLogic.shouldShow(isFlagged: element.isFlagged, hasImage: element.hasImage) {
                 let x = CGFloat(6 + element.index * 103 + 76)
                 let y = CGFloat(6)
                 let rect = CGRect(x: x, y: y, width: 24, height: 24)
