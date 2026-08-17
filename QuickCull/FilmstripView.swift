@@ -58,7 +58,7 @@ struct FilmstripView: View {
                 }
                 .padding(6)
             }
-            .frame(height: 86)
+            .frame(height: 102) // was 86; adds room for caption (64 thumb + 3 spacing + ~13 caption + 12 padding)
             .background(.thinMaterial)
             .onChange(of: appState.session?.currentIndex) {
                 // scrollTo must target the ForEach's identity (the strip
@@ -93,18 +93,28 @@ struct ThumbnailCell: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        BadgedThumbnailView(
-            image: appState.thumbWindow?.image(at: index),
-            isFlagged: isFlagged,
-            size: CGSize(width: 100, height: 64),
-            badgeSize: 24
-        )
-        .overlay(
-            Rectangle().strokeBorder(
-                index == appState.session?.currentIndex ? Color.accentColor : .clear,
-                lineWidth: 2)
-        )
+        VStack(spacing: 3) {
+            BadgedThumbnailView(
+                image: appState.thumbWindow?.image(at: index),
+                isFlagged: isFlagged,
+                size: CGSize(width: 100, height: 64),
+                badgeSize: 24
+            )
+            .overlay(
+                Rectangle().strokeBorder(
+                    index == appState.session?.currentIndex ? Color.accentColor : .clear,
+                    lineWidth: 2)
+            )
+            Text(file.url.lastPathComponent)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 100, alignment: .center)
+                .help(file.url.lastPathComponent)
+        }
         .contentShape(Rectangle())
         .onTapGesture { appState.setCurrentIndex(index) }
+        .help(file.url.lastPathComponent) // tooltip when hovering thumb as well
     }
 }
