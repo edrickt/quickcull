@@ -37,6 +37,20 @@ struct ImageDisplayView: View {
                     lastOffset: $zoomLastOffset
                 )
                 .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
+                .overlay(alignment: .leading) {
+                    if hudVisible, let file = currentFile {
+                        HStack(spacing: 0) {
+                            MetadataHUDView(file: file, cgImage: cgImage)
+                                .frame(width: 240)
+                                .background(.ultraThinMaterial)
+                                .overlay(Rectangle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5), alignment: .trailing)
+                                .transition(.move(edge: .leading).combined(with: .opacity))
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: hudVisible)
+                .clipped()
             } else {
                 ProgressView().controlSize(.large)
             }
@@ -186,6 +200,51 @@ private struct ZoomableImageView: View {
             width: min(max(off.width, -maxX), maxX),
             height: min(max(off.height, -maxY), maxY)
         )
+    }
+}
+
+private struct MetadataHUDView: View {
+    let file: SessionFile
+    let cgImage: CGImage?
+    @State private var metadata: ImageMetadata?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(rows, id: \.label) { row in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(row.label).font(.caption2).foregroundStyle(.secondary)
+                        Text(row.value).font(.caption).foregroundStyle(.primary)
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(row.value)
+                    }
+                }
+            }
+            .padding(10)
+        }
+        .task(id: file.id) {
+            metadata = await Task.detached(priority: .utility) {
+                ImageMetadataProvider.metadata(for: file, cgImage: cgImage)
+            }.value
+        }
+    }
+
+    private var rows: [(label: String, value: String)] {
+        guard let m = metadata else { return [("Loading…", "")] }
+        var r: [(String, String)] = []
+        r.append(("File", m.filename))
+        if let v = m.dimensions { r.append(("Dimensions", v)) }
+        if let v = m.fileSize { r.append(("Size", v)) }
+        if let v = m.camera { r.append(("Camera", v)) }
+        if let v = m.lens { r.append(("Lens", v)) }
+        if let v = m.iso { r.append(("ISO", v)) }
+        if let v = m.aperture { r.append(("Aperture", v)) }
+        if let v = m.shutter { r.append(("Shutter", v)) }
+        if let v = m.focalLength { r.append(("Focal", v)) }
+        if let v = m.dateTaken { r.append(("Date", v)) }
+        if let v = m.exposureBias { r.append(("Exposure Bias", v)) }
+        if let v = m.whiteBalance { r.append(("White Balance", v)) }
+        return r
     }
 }
 
