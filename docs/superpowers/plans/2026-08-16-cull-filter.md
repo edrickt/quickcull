@@ -10,7 +10,8 @@
 
 ## Global Constraints
 
-- Default filter is `.all`; pre-filter behavior must be bit-for-bit unchanged (existing 69 tests pin this).- Filter is per-session state: fresh `Session` per import, always starting at `.all`.
+- Default filter is `.all`; pre-filter behavior must be bit-for-bit unchanged (existing 69 tests pin this).
+- Filter is per-session state: fresh `Session` per import, always starting at `.all`.
 - Under a non-All filter, a flag toggle always drops the current photo out of the sequence and auto-advances to the next match (index clamped at the end).
 - An empty visible sequence falls back to `.all`: after the last photo drops out, keep that photo current (by id); after a commit empties it, land on the first remaining file.
 - `flaggedFiles` must filter `allFiles` (not the projection) — commit must find flagged files while the Keepers filter hides them.
