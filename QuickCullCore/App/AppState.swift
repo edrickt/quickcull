@@ -48,6 +48,25 @@ public final class AppState {
         Task { try? await cache.wipe() }
     }
 
+    /// Full reset equivalent to quit+relaunch. Single owner of the empty transition.
+    /// Always confirmed by ScrubView, so no flag-count guard here.
+    @MainActor
+    public func startNewSession() {
+        Task { try? await cache.wipe() }
+        session = nil
+        thumbWindow = nil
+        gridThumbs = nil
+        displayImages = nil
+        importFailures = []
+        commitFailures = []
+        pendingCommitCount = 0
+        isCommitting = false
+        gridSelection = []
+        gridAnchorID = nil
+        viewMode = .scrub
+        phase = .empty
+    }
+
     /// Import: validate + dedupe, then Phase 1 (decode everything), then scrub.
     public func importFiles(urls: [URL]) {
         viewMode = .scrub

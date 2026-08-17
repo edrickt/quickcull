@@ -500,4 +500,51 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(state.gridSelection.isEmpty)
     }
 
+    func testStartNewSessionResetsToEmpty() async throws {
+        // Setup: import 2 files, flag one, select in grid, create failures
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let state = makeState() // helper that injects temp ImageCacheStore, same as existing tests
+        state.importFiles(urls: [a, b])
+        await waitForScrubbing(state)
+        // make non-empty state: flag, filter, grid selection, failures
+        state.session?.toggleFlag() // flag current
+        state.setFilter(.flagged)
+        state.setViewMode(.grid)
+        state.selectSingle(id: state.session!.files[0].id)
+        state.requestCommit() // pendingCommitCount >0 but not committing
+        // Create a marker file in cache to verify wipe is attempted (best-effort)
+        let baseURL = await state.cache.baseURL
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        let marker = baseURL.appendingPathComponent("marker.tmp")
+        try Data("x".utf8).write(to: marker)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+
+        // Act
+        state.startNewSession()
+        // Allow detached Task { try? await cache.wipe() } to run
+        try await Task.sleep(nanoseconds: 300_000_000) // 0.3s
+
+        // Assert full reset like quit/relaunch
+        XCTAssertEqual(state.phase, .empty)
+        XCTAssertNil(state.session)
+        XCTAssertNil(state.thumbWindow)
+        XCTAssertNil(state.gridThumbs)
+        XCTAssertNil(state.displayImages)
+        XCTAssertTrue(state.importFailures.isEmpty)
+        XCTAssertTrue(state.commitFailures.isEmpty)
+        XCTAssertEqual(state.pendingCommitCount, 0)
+        XCTAssertFalse(state.isCommitting)
+        XCTAssertTrue(state.gridSelection.isEmpty)
+        XCTAssertEqual(state.viewMode, .scrub)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path), "cache should be wiped")
+    }
+
+    func testStartNewSessionIsIdempotentWhenAlreadyEmpty() {
+        let state = makeState()
+        XCTAssertEqual(state.phase, .empty)
+        state.startNewSession()
+        XCTAssertEqual(state.phase, .empty)
+        XCTAssertNil(state.session)
+    }
 }
