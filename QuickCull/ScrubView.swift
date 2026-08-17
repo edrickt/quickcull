@@ -35,10 +35,8 @@ struct ScrubView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { showNewSessionConfirm = true } label: {
-                    Label("New Session", systemImage: "plus.rectangle")
-                }
-                .disabled(appState.isCommitting)
+                Button("New Session") { showNewSessionConfirm = true }
+                    .disabled(appState.isCommitting)
             }
             ToolbarItem(placement: .primaryAction) {
                 Picker("View", selection: Binding(
