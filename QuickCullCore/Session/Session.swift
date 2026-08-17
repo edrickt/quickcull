@@ -73,9 +73,10 @@ public final class Session {
     public func setFilter(_ filter: CullFilter) {
         let newFiles = projection(for: filter)
         guard !newFiles.isEmpty else {
+            let currentID = currentFile.id
             self.filter = .all
             files = allFiles
-            if let idx = allFiles.firstIndex(where: { $0.id == currentFile.id }) {
+            if let idx = allFiles.firstIndex(where: { $0.id == currentID }) {
                 currentIndex = idx
             }
             return
