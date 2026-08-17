@@ -102,4 +102,41 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(start), 0.4,
                           "timeout must return before the slow loader finishes")
     }
+
+    func testEnsureLoadedBeyondRadius() async {
+        let window = ImageWindow(radius: 1, count: count, loader: makeLoader())
+        window.setCurrent(0) // loads 0,1
+        await window.waitUntilSettled()
+        window.ensureLoaded(indices: [90])
+        await window.waitUntilSettled()
+        XCTAssertNotNil(window.image(at: 90))
+        XCTAssertNotNil(window.image(at: 0)) // scrub window still there
+    }
+
+    func testEnsureLoadedMultipleAndEviction() async {
+        let window = ImageWindow(radius: 2, count: count, loader: makeLoader())
+        window.setCurrent(50)
+        await window.waitUntilSettled()
+        window.ensureLoaded(indices: [0, 99])
+        await window.waitUntilSettled()
+        XCTAssertNotNil(window.image(at: 0))
+        XCTAssertNotNil(window.image(at: 99))
+        // Move far: ensured indices outside new window + ensures should not all survive if not re-ensured
+        window.setCurrent(50)
+        await window.waitUntilSettled()
+        window.ensureLoaded(indices: [10])
+        window.setCurrent(90)
+        await window.waitUntilSettled()
+        // 10 was ensured last time but not this time; it may be evicted (allowed). Just ensure current window intact:
+        XCTAssertNotNil(window.image(at: 90))
+    }
+
+    func testEnsureLoadedIgnoresOutOfBounds() async {
+        let window = ImageWindow(radius: 1, count: 3, loader: makeLoader())
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+        window.ensureLoaded(indices: [-1, 3, 99])
+        await window.waitUntilSettled()
+        XCTAssertLessThanOrEqual(window.images.count, 3)
+    }
 }

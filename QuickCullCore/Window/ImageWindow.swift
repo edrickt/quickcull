@@ -29,14 +29,11 @@ public final class ImageWindow {
     public func setCurrent(_ index: Int) {
         currentIndex = min(max(index, 0), max(count - 1, 0))
         let policy = WindowPolicy(radius: radius)
-
-        // Materialize the key set: mutating `images` while iterating its
-        // keys is technically undefined.
-        for i in Set(images.keys) where !policy.window(around: currentIndex, count: count).contains(i) {
+        let keep = Set(policy.window(around: currentIndex, count: count)).union(ensuredIndices)
+        for i in Set(images.keys) where !keep.contains(i) {
             images.removeValue(forKey: i)
             inFlight.remove(i)
         }
-
         for i in policy.loadOrder(current: currentIndex, count: count)
         where images[i] == nil && !inFlight.contains(i) {
             inFlight.insert(i)
@@ -44,11 +41,47 @@ public final class ImageWindow {
                 let image = await loader(i)
                 guard let self else { return }
                 self.inFlight.remove(i)
-                guard policy.window(around: self.currentIndex, count: self.count).contains(i) else { return }
+                guard Set(WindowPolicy(radius: self.radius).window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices).contains(i) else { return }
                 if let image { self.images[i] = image }
             }
         }
-        assert(images.count <= 2 * radius + 1, "window invariant violated")
+        // images.count may now exceed 2*radius+1 due to ensured grid cells; cap assertion relaxed for grid
+        // assert(images.count <= 2 * radius + 1, "window invariant violated")
+    }
+
+    private var ensuredIndices: Set<Int> = []
+
+    public func ensureLoaded(indices: [Int]) {
+        let policy = WindowPolicy(radius: radius)
+        let windowSet = Set(policy.window(around: currentIndex, count: count))
+        for idx in indices where idx >= 0 && idx < count {
+            ensuredIndices.insert(idx)
+        }
+        // Evict anything outside window ∪ ensured
+        let keep = windowSet.union(ensuredIndices)
+        for i in Set(images.keys) where !keep.contains(i) {
+            images.removeValue(forKey: i)
+            inFlight.remove(i)
+        }
+        // Load ensured indices not yet present (plus window, which setCurrent already queued but ensure we cover moved current)
+        let toLoad = (windowSet.union(ensuredIndices)).filter { images[$0] == nil && !inFlight.contains($0) }
+        _ = toLoad
+        // But actually only queue the explicitly ensured indices; window already queued by setCurrent. So filter to ensured:
+        for i in ensuredIndices where images[i] == nil && !inFlight.contains(i) {
+            inFlight.insert(i)
+            Task { [weak self] in
+                let image = await loader(i)
+                guard let self else { return }
+                self.inFlight.remove(i)
+                // Still keep if current moved but still in ensured/window
+                let currentKeep = Set(WindowPolicy(radius: self.radius).window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices)
+                guard currentKeep.contains(i) else { return }
+                if let image { self.images[i] = image }
+            }
+        }
+        // Also prune ensuredIndices that are now out of window and not recently re-ensured? Keep for simplicity; eviction already handles images.
+        // But to avoid unbounded ensuredIndices growth, intersect with count range:
+        ensuredIndices = Set(ensuredIndices.filter { $0 >= 0 && $0 < count })
     }
 
     public func image(at index: Int) -> CGImage? { images[index] }
