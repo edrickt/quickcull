@@ -5,6 +5,7 @@ struct ScrubView: View {
     @Environment(AppState.self) private var appState
     @State private var showCommitConfirm = false
     @State private var showCommitFailures = false
+    @State private var showNewSessionConfirm = false
     // Zoom persists across images while staying in single-view mode, but
     // resets when leaving single (to grid) so a grid round-trip never
     // restores a stale 200% zoom. Hoisted here because ImageDisplayView is
@@ -33,6 +34,12 @@ struct ScrubView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showNewSessionConfirm = true } label: {
+                    Label("New Session", systemImage: "plus.rectangle")
+                }
+                .disabled(appState.isCommitting)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Picker("View", selection: Binding(
                     get: { appState.viewMode },
@@ -83,6 +90,12 @@ struct ScrubView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("The remaining files keep their flags. You may need to grant file access in System Settings.")
+        }
+        .alert("Start new session?", isPresented: $showNewSessionConfirm) {
+            Button("Start New Session", role: .destructive) { appState.startNewSession() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Current session — including flagged photos — will be discarded. The decode cache will be cleared.")
         }
         .onChange(of: appState.commitFailures.count) {
             if appState.commitFailures.count > 0 { showCommitFailures = true }
