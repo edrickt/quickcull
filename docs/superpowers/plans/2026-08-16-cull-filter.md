@@ -261,7 +261,7 @@ xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest -XCTest SessionTests
 ```
 
-Expected: PASS — all 11 Session tests (5 existing + 6 new).
+Expected: PASS — all 16 Session tests (10 existing + 6 new).
 
 - [ ] **Step 6: Commit**
 
@@ -473,7 +473,7 @@ xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
-Expected: PASS — all 83 tests (75 existing + 8 new). The 5 pre-existing `remove` tests pin today's index-shift semantics; they must pass unmodified.
+Expected: PASS — all 105 tests (97 existing + 8 new). The 5 pre-existing `remove` tests pin today's index-shift semantics; they must pass unmodified.
 
 - [ ] **Step 7: Commit**
 
@@ -605,7 +605,7 @@ xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
-Expected: PASS — all 86 tests.
+Expected: PASS — all 108 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -665,7 +665,7 @@ xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
-Expected: PASS — all 86 tests.
+Expected: PASS — all 108 tests.
 
 - [ ] **Step 4: Manual verification** — run `./start.sh`, import a folder of photos, and check:
 
