@@ -228,6 +228,13 @@ public final class AppState {
         viewMode = .scrub
     }
 
+    public func selectAllInGrid() {
+        guard phase == .scrubbing, viewMode == .grid, let session else { return }
+        guard !session.files.isEmpty else { return }
+        gridSelection = Set(session.files.map(\.id))
+        gridAnchorID = session.files.first?.id
+    }
+
     private func syncWindows() {
         guard let session else { return }
         thumbWindow?.setCurrent(session.currentIndex)
