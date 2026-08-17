@@ -14,6 +14,7 @@ struct ScrubView: View {
     @State private var zoomLastScale: CGFloat = 1
     @State private var zoomOffset: CGSize = .zero
     @State private var zoomLastOffset: CGSize = .zero
+    @State private var hudVisible = false // hidden by default, Single only
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +28,8 @@ struct ScrubView: View {
                     zoomScale: $zoomScale,
                     zoomLastScale: $zoomLastScale,
                     zoomOffset: $zoomOffset,
-                    zoomLastOffset: $zoomLastOffset
+                    zoomLastOffset: $zoomLastOffset,
+                    hudVisible: $hudVisible
                 )
                 Divider()
                 FilmstripView()
@@ -73,6 +75,13 @@ struct ScrubView: View {
                 }
                 .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting)
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button { hudVisible.toggle() } label: {
+                    Label(hudVisible ? "Hide Info" : "Show Info", systemImage: hudVisible ? "eye.slash" : "eye")
+                }
+                .help(hudVisible ? "Hide metadata" : "Show metadata")
+                .disabled(appState.isCommitting)
+            }
         }
         .alert("Move \(appState.pendingCommitCount) file(s) to Trash?",
                isPresented: $showCommitConfirm) {
@@ -105,6 +114,7 @@ struct ScrubView: View {
                 zoomLastScale = 1
                 zoomOffset = .zero
                 zoomLastOffset = .zero
+                hudVisible = false
             }
         }
         .onChange(of: appState.viewMode) { oldMode, newMode in
@@ -115,6 +125,7 @@ struct ScrubView: View {
                 zoomLastScale = 1
                 zoomOffset = .zero
                 zoomLastOffset = .zero
+                hudVisible = false
             }
         }
     }

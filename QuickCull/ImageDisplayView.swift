@@ -7,6 +7,7 @@ struct ImageDisplayView: View {
     @Binding var zoomLastScale: CGFloat
     @Binding var zoomOffset: CGSize
     @Binding var zoomLastOffset: CGSize
+    @Binding var hudVisible: Bool
 
     var body: some View {
         let index = appState.session?.currentIndex ?? 0
