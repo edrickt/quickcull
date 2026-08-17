@@ -213,10 +213,12 @@ public final class AppState {
         if isShift { selectRange(to: id) }
         else if isCmd { toggleSelection(id: id) }
         else { selectSingle(id: id) }
-        if let idx = session?.files.firstIndex(where: { $0.id == id }) {
-            session?.setIndex(idx)
-            syncWindows()
-        }
+        // Do NOT move currentIndex or sync windows here: selection is
+        // highlight-only. Current photo stays where scrub left it; double-click
+        // is the explicit jump to scrub at that photo (setIndex+syncWindows).
+        // Removing setIndex/syncWindows here avoids ImageWindow window
+        // recompute (evict + 61 loader Tasks) on every Cmd/Shift click,
+        // which made grid selection extremely slow for 100+ photos.
     }
 
     public func handleGridDoubleClick(id: String) {

@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreGraphics
 import QuickCullCore
 #if canImport(AppKit)
 import AppKit
@@ -10,32 +11,49 @@ struct GridView: View {
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 8)]
 
     var body: some View {
+        // Parent-body reads: avoid per-cell observation that makes LazyVGrid re-evaluate 500 cells on every gridSelection change.
+        // Mirrors FilmstripView's stripKey/elements pattern for fast scrub.
         let files = appState.session?.files ?? []
+        let gridSelection = appState.gridSelection
+        let flagged = appState.session?.flagged ?? Set<String>()
+        let thumbImages = appState.thumbWindow?.images ?? [:]
         if files.isEmpty {
             ZStack { Color.black; Text("No photos in this filter").foregroundStyle(.secondary) }
         } else {
+            // Compute once per body evaluation; GridCell receives plain values, not @Environment reads.
+            let elements: [(index: Int, file: SessionFile, isSelected: Bool, isFlagged: Bool, image: CGImage?)] = files.enumerated().map { idx, file in
+                (index: idx,
+                 file: file,
+                 isSelected: gridSelection.contains(file.id),
+                 isFlagged: flagged.contains(file.id),
+                 image: thumbImages[idx])
+            }
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
-                        GridCell(index: index, file: file,
-                                 isSelected: appState.gridSelection.contains(file.id),
-                                 isFlagged: appState.session?.isFlagged(file) ?? false)
-                        .onAppear { appState.thumbWindow?.ensureLoaded(indices: [index]) }
+                    ForEach(elements, id: \.file.id) { element in
+                        GridCell(
+                            index: element.index,
+                            file: element.file,
+                            isSelected: element.isSelected,
+                            isFlagged: element.isFlagged,
+                            image: element.image
+                        )
+                        .onAppear { appState.thumbWindow?.ensureLoaded(indices: [element.index]) }
                         .onTapGesture(count: 1) {
 #if canImport(AppKit)
                             let flags = NSEvent.modifierFlags
-                            appState.handleGridTap(id: file.id,
+                            appState.handleGridTap(id: element.file.id,
                                                    isCmd: flags.contains(.command),
                                                    isShift: flags.contains(.shift))
 #else
-                            appState.handleGridTap(id: file.id, isCmd: false, isShift: false)
+                            appState.handleGridTap(id: element.file.id, isCmd: false, isShift: false)
 #endif
                         }
                         .onTapGesture(count: 2) {
-                            appState.handleGridDoubleClick(id: file.id)
+                            appState.handleGridDoubleClick(id: element.file.id)
                         }
-                        .accessibilityLabel(file.url.lastPathComponent)
-                        .accessibilityAddTraits(appState.gridSelection.contains(file.id) ? .isSelected : [])
+                        .accessibilityLabel(element.file.url.lastPathComponent)
+                        .accessibilityAddTraits(element.isSelected ? .isSelected : [])
                     }
                 }
                 .padding(12)
@@ -46,11 +64,10 @@ struct GridView: View {
 }
 
 private struct GridCell: View {
-    let index: Int; let file: SessionFile; let isSelected: Bool; let isFlagged: Bool
-    @Environment(AppState.self) private var appState
+    let index: Int; let file: SessionFile; let isSelected: Bool; let isFlagged: Bool; let image: CGImage?
     var body: some View {
         BadgedThumbnailView(
-            image: appState.thumbWindow?.image(at: index),
+            image: image,
             isFlagged: isFlagged,
             size: CGSize(width: 160, height: 108),
             badgeSize: 24
