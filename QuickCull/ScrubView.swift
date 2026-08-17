@@ -17,6 +17,19 @@ struct ScrubView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Picker("Filter", selection: Binding(
+                    get: { appState.session?.filter ?? .all },
+                    set: { appState.setFilter($0) }
+                )) {
+                    Text("All").tag(CullFilter.all)
+                    Text("Flagged (\(appState.session?.flaggedCount ?? 0))").tag(CullFilter.flagged)
+                    Text("Keepers (\(appState.session.map { $0.totalCount - $0.flaggedCount } ?? 0))")
+                        .tag(CullFilter.keepers)
+                }
+                .pickerStyle(.segmented)
+                .disabled(appState.isCommitting)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     appState.requestCommit()
                     showCommitConfirm = true
