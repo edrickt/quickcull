@@ -51,20 +51,19 @@ struct ImageDisplayView: View {
                                 } else { Color.black }
                             }.frame(width: geo.size.width, height: geo.size.height)
                         }.clipped()
-                        // Right — next preview, fit only, dimmed
+                        // Right — next preview, zoomable synchronized with left (shared bindings)
                         GeometryReader { geo in
                             ZStack {
                                 Color.black
-                                if let img = rightCG {
-                                    Image(decorative: img, scale: 1).resizable().aspectRatio(contentMode: .fit)
-                                        .frame(width: fittedSize(for: img, in: geo.size).width, height: fittedSize(for: img, in: geo.size).height)
-                                        .opacity(0.92)
-                                        .clipped()
+                                if let img = rightCG, rightFile != nil {
+                                    // Use leftFile.id as pair id so both recentre together on new pair
+                                    ZoomableImageView(cgImage: img, fileID: currentFile?.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
+                                } else if rightFile == nil {
+                                    VStack(spacing: 8) { Image(systemName:"photo.slash").font(.title2).foregroundStyle(.secondary)
+                                                         Text("No next image").font(.caption).foregroundStyle(.secondary) }
                                 } else {
-                                    VStack(spacing: 8) {
-                                        Image(systemName: "photo.slash").font(.title2).foregroundStyle(.secondary)
-                                        Text("No next image").font(.caption).foregroundStyle(.secondary)
-                                    }
+                                    // rightFile exists but rightCG not yet loaded (thumb pending)
+                                    Color.black
                                 }
                             }.frame(width: geo.size.width, height: geo.size.height)
                         }.clipped()
@@ -94,14 +93,6 @@ struct ImageDisplayView: View {
         }
     }
 
-    // Helper for right pane fit (reuse Zoomable's fittedSize logic, scale 1)
-    private func fittedSize(for image: CGImage, in container: CGSize) -> CGSize {
-        guard container.width>0, container.height>0 else { return .zero }
-        let imageAspect = CGFloat(image.width)/CGFloat(image.height)
-        let containerAspect = container.width/container.height
-        if imageAspect > containerAspect { let w=container.width; return CGSize(width:w,height:w/imageAspect) }
-        else { let h=container.height; return CGSize(width:h*imageAspect,height:h) }
-    }
 }
 
 /// Zoomable container for the main viewer image.
