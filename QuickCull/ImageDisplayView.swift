@@ -19,35 +19,73 @@ struct ImageDisplayView: View {
         let currentFile = (appState.session?.files.indices.contains(index) ?? false)
             ? appState.session?.files[index]
             : nil
+        let rightIndex = index + 1
+        let rightFile: SessionFile? = (appState.session?.files.indices.contains(rightIndex) ?? false)
+            ? appState.session?.files[rightIndex]
+            : nil
+        let leftCG = appState.displayImages?.image(at: index) ?? appState.thumbWindow?.image(at: index)
+        let rightCG = rightFile != nil ? (appState.displayImages?.image(at: rightIndex) ?? appState.thumbWindow?.image(at: rightIndex)) : nil
+
         ZStack {
             Color.black
             if appState.session?.files.isEmpty == true {
                 // Filter matches nothing (Flagged 0 or Keepers 0) — nothing to load, show empty black instead of spinner
                 Color.black
-            } else if let cgImage = appState.displayImages?.image(at: index) ?? appState.thumbWindow?.image(at: index) {
+            } else if appState.viewMode == .split {
                 HStack(spacing: 0) {
-                    if hudVisible, let file = currentFile {
-                        MetadataHUDView(file: file, cgImage: cgImage)
+                    if hudVisible, let file = currentFile, let lcg = leftCG {
+                        MetadataHUDView(file: file, cgImage: lcg)
                             .frame(width: 240)
                             .background(.ultraThinMaterial)
                             .transition(.move(edge: .leading).combined(with: .opacity))
-                        Divider() // 1pt separator, only when HUD shown
+                        Divider()
+                    }
+                    HStack(spacing: 0) {
+                        // Left — current, zoomable, flag target
+                        GeometryReader { geo in
+                            ZStack {
+                                Color.black
+                                if let img = leftCG, let file = currentFile {
+                                    ZoomableImageView(cgImage: img, fileID: file.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
+                                        .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: file) }
+                                } else { Color.black }
+                            }.frame(width: geo.size.width, height: geo.size.height)
+                        }.clipped()
+                        if rightFile != nil { Divider() }
+                        // Right — next preview, fit only, dimmed
+                        GeometryReader { geo in
+                            ZStack {
+                                Color.black
+                                if let img = rightCG {
+                                    Image(decorative: img, scale: 1).resizable().aspectRatio(contentMode: .fit)
+                                        .frame(width: fittedSize(for: img, in: geo.size).width, height: fittedSize(for: img, in: geo.size).height)
+                                        .opacity(0.92)
+                                        .clipped()
+                                } else {
+                                    VStack(spacing: 8) {
+                                        Image(systemName: "photo.slash").font(.title2).foregroundStyle(.secondary)
+                                        Text("No next image").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }.frame(width: geo.size.width, height: geo.size.height)
+                        }.clipped()
+                    }
+                }
+                .overlay(alignment: .topTrailing) { /* no right badge */ }
+                .animation(.easeInOut(duration: 0.2), value: hudVisible)
+                .animation(.easeInOut(duration: 0.15), value: appState.viewMode)
+            } else if let cgImage = leftCG { // Single (existing)
+                HStack(spacing: 0) {
+                    if hudVisible, let file = currentFile {
+                        MetadataHUDView(file: file, cgImage: cgImage).frame(width: 240).background(.ultraThinMaterial).transition(.move(edge:.leading).combined(with:.opacity))
+                        Divider()
                     }
                     GeometryReader { geo in
                         ZStack {
                             Color.black
-                            ZoomableImageView(
-                                cgImage: cgImage,
-                                fileID: currentFile?.id,
-                                scale: $zoomScale,
-                                lastScale: $zoomLastScale,
-                                offset: $zoomOffset,
-                                lastOffset: $zoomLastOffset
-                            )
-                        }
-                        .frame(width: geo.size.width, height: geo.size.height)
-                    }
-                    .clipped()
+                            ZoomableImageView(cgImage: cgImage, fileID: currentFile?.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
+                        }.frame(width: geo.size.width, height: geo.size.height)
+                    }.clipped()
                 }
                 .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
                 .animation(.easeInOut(duration: 0.2), value: hudVisible)
@@ -55,6 +93,15 @@ struct ImageDisplayView: View {
                 ProgressView().controlSize(.large)
             }
         }
+    }
+
+    // Helper for right pane fit (reuse Zoomable's fittedSize logic, scale 1)
+    private func fittedSize(for image: CGImage, in container: CGSize) -> CGSize {
+        guard container.width>0, container.height>0 else { return .zero }
+        let imageAspect = CGFloat(image.width)/CGFloat(image.height)
+        let containerAspect = container.width/container.height
+        if imageAspect > containerAspect { let w=container.width; return CGSize(width:w,height:w/imageAspect) }
+        else { let h=container.height; return CGSize(width:h*imageAspect,height:h) }
     }
 }
 
