@@ -16,7 +16,10 @@ struct ImageDisplayView: View {
             : nil
         ZStack {
             Color.black
-            if let image = appState.displayImages?.image(at: index) {
+            if appState.session?.files.isEmpty == true {
+                // Filter matches nothing (Flagged 0 or Keepers 0) — nothing to load, show empty black instead of spinner
+                Color.black
+            } else if let image = appState.displayImages?.image(at: index) {
                 Image(decorative: image, scale: 1)
                     .resizable()
                     .scaledToFit()
