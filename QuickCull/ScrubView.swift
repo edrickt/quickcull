@@ -11,11 +11,24 @@ struct ScrubView: View {
             if !appState.importFailures.isEmpty {
                 importFailuresBanner
             }
-            ImageDisplayView()
-            Divider()
-            FilmstripView()
+            if appState.viewMode == .grid {
+                GridView()
+            } else {
+                ImageDisplayView()
+                Divider()
+                FilmstripView()
+            }
         }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Picker("View", selection: Binding(
+                    get: { appState.viewMode },
+                    set: { appState.setViewMode($0) }
+                )) {
+                    Text("Strip").tag(AppState.ViewMode.scrub)
+                    Text("Grid").tag(AppState.ViewMode.grid)
+                }.pickerStyle(.segmented).disabled(appState.isCommitting)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Picker("Filter", selection: Binding(
                     get: { appState.session?.filter ?? .all },
