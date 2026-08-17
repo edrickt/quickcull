@@ -32,15 +32,15 @@ struct ImageDisplayView: View {
                 // Filter matches nothing (Flagged 0 or Keepers 0) — nothing to load, show empty black instead of spinner
                 Color.black
             } else if appState.viewMode == .split {
-                HStack(spacing: 0) {
+                HStack(spacing: 8) { // was spacing:0 with Divider() after HUD
                     if hudVisible, let file = currentFile, let lcg = leftCG {
                         MetadataHUDView(file: file, cgImage: lcg)
                             .frame(width: 240)
                             .background(.ultraThinMaterial)
                             .transition(.move(edge: .leading).combined(with: .opacity))
-                        Divider()
+                        // Divider() removed — gap via HStack spacing 8 + Color.black background
                     }
-                    HStack(spacing: 0) {
+                    HStack(spacing: 8) { // was spacing:0, gap replaces Divider
                         // Left — current, zoomable, flag target
                         GeometryReader { geo in
                             ZStack {
@@ -51,7 +51,6 @@ struct ImageDisplayView: View {
                                 } else { Color.black }
                             }.frame(width: geo.size.width, height: geo.size.height)
                         }.clipped()
-                        if rightFile != nil { Divider() }
                         // Right — next preview, fit only, dimmed
                         GeometryReader { geo in
                             ZStack {
@@ -75,10 +74,10 @@ struct ImageDisplayView: View {
                 .animation(.easeInOut(duration: 0.2), value: hudVisible)
                 .animation(.easeInOut(duration: 0.15), value: appState.viewMode)
             } else if let cgImage = leftCG { // Single (existing)
-                HStack(spacing: 0) {
+                HStack(spacing: 8) { // was spacing:0 with Divider() after HUD — gap via spacing 8 + Color.black
                     if hudVisible, let file = currentFile {
                         MetadataHUDView(file: file, cgImage: cgImage).frame(width: 240).background(.ultraThinMaterial).transition(.move(edge:.leading).combined(with:.opacity))
-                        Divider()
+                        // Divider() removed — gap via HStack spacing 8
                     }
                     GeometryReader { geo in
                         ZStack {
