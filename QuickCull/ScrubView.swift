@@ -25,7 +25,7 @@ struct ScrubView: View {
                     get: { appState.viewMode },
                     set: { appState.setViewMode($0) }
                 )) {
-                    Text("Strip").tag(AppState.ViewMode.scrub)
+                    Text("Single").tag(AppState.ViewMode.scrub)
                     Text("Grid").tag(AppState.ViewMode.grid)
                 }.pickerStyle(.segmented).disabled(appState.isCommitting)
             }
