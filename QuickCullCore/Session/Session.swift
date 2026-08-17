@@ -69,26 +69,27 @@ public final class Session {
     /// Switches the visible sequence to `filter`. The current photo stays
     /// current when it still matches; otherwise the nearest match in full
     /// list order takes over, ties resolving forward. A filter matching
-    /// nothing (e.g. Flagged while nothing is flagged) falls back to All.
+    /// nothing yields an empty projection (placeholder) with `files==[]`,
+    /// not a fallback to All — the grid shows "No photos in this filter".
+    /// `toggleFlag`/`toggleFlags` empty projections still fall back to All
+    /// (batch distinction).
     public func setFilter(_ filter: CullFilter) {
-        guard !files.isEmpty else { return }
         let newFiles = projection(for: filter)
-        guard !newFiles.isEmpty else {
-            let currentID = currentFile.id
-            self.filter = .all
-            files = allFiles
-            if let idx = allFiles.firstIndex(where: { $0.id == currentID }) {
-                currentIndex = idx
-            }
+        if newFiles.isEmpty {
+            self.filter = filter
+            files = []
+            currentIndex = 0
             return
         }
-        let currentID = currentFile.id
+        let currentID: String? = files.isEmpty ? nil : currentFile.id
         self.filter = filter
         files = newFiles
-        if let idx = newFiles.firstIndex(where: { $0.id == currentID }) {
+        if let cid = currentID, let idx = newFiles.firstIndex(where: { $0.id == cid }) {
             currentIndex = idx
+        } else if let cid = currentID {
+            currentIndex = nearestMatchIndex(to: cid, in: newFiles)
         } else {
-            currentIndex = nearestMatchIndex(to: currentID, in: newFiles)
+            currentIndex = 0
         }
     }
 
@@ -199,11 +200,18 @@ public final class Session {
     /// to the projection. A commit that empties the visible sequence while
     /// files remain (e.g. every flagged photo committed in Flagged mode)
     /// falls back to All, landing on the first file.
+    /// When `files` is an empty placeholder (filter yields empty), removal
+    /// still operates on `allFiles` so commits from placeholder-state work.
     public func remove(_ filesToRemove: [SessionFile]) {
-        guard !files.isEmpty else { return }
+        guard !allFiles.isEmpty else { return }
         let ids = Set(filesToRemove.map(\.id))
         let original = allFiles
-        let currentPos = original.firstIndex(where: { $0.id == currentFile.id }) ?? 0
+        let currentPos: Int
+        if !files.isEmpty {
+            currentPos = original.firstIndex(where: { $0.id == currentFile.id }) ?? 0
+        } else {
+            currentPos = 0
+        }
         flagged.subtract(ids)
         allFiles.removeAll { ids.contains($0.id) }
         files = projection(for: filter)

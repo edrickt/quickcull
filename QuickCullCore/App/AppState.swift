@@ -103,6 +103,7 @@ public final class AppState {
                         thumbWindow = nil
                         displayImages = nil
                         phase = .empty
+                        viewMode = .scrub
                     } else if let session {
                         // Loaders index into the files array, so it must be
                         // the post-removal list.
@@ -249,6 +250,7 @@ public final class AppState {
             thumbWindow = nil
             displayImages = nil
             phase = .empty
+            viewMode = .scrub
         } else {
             installWindows(for: session.files)
         }

@@ -459,4 +459,44 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.session?.count, 1)
     }
 
+    func testSetFilterEmptyPlaceholderKeepsGhosts() async throws {
+        let files = try (0..<2).map { try TestFixtures.makeRawFile(named: "k\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+        let ids = state.session!.files.map(\.id)
+        state.setViewMode(.grid)
+        state.selectSingle(id: ids[0])
+        // No flags yet: Flagged filter yields empty placeholder, not fallback
+        state.setFilter(.flagged)
+        XCTAssertEqual(state.session?.filter, .flagged)
+        XCTAssertEqual(state.session?.count, 0)
+        XCTAssertTrue(state.session?.isEmpty == true)
+        XCTAssertEqual(state.thumbWindow?.count, 0)
+        XCTAssertEqual(state.displayImages?.count, 0)
+        // Ghost selection stays (not pruned on filter)
+        XCTAssertEqual(state.gridSelection, [ids[0]])
+        // Back to All restores
+        state.setFilter(.all)
+        XCTAssertEqual(state.session?.count, 2)
+        XCTAssertEqual(state.thumbWindow?.count, 2)
+    }
+
+    func testCommitEmptiesSessionResetsViewMode() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let state = makeState()
+        state.importFiles(urls: [a])
+        await waitForScrubbing(state)
+        state.setViewMode(.grid)
+        XCTAssertEqual(state.viewMode, .grid)
+        // Empty selection in grid falls back to single-flag current
+        state.handle(.toggleFlag)
+        XCTAssertEqual(state.session?.flaggedCount, 1)
+        state.requestCommit()
+        await state.confirmCommit()
+        XCTAssertEqual(state.phase, .empty)
+        XCTAssertEqual(state.viewMode, .scrub)
+        XCTAssertTrue(state.gridSelection.isEmpty)
+    }
+
 }

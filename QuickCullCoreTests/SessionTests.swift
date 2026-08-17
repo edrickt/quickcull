@@ -154,24 +154,27 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
     }
 
-    func testFilterMatchingNothingResetsToAll() {
+    func testFilterMatchingNothingShowsEmpty() {
         let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
         session.setFilter(.flagged)       // nothing is flagged
-        XCTAssertEqual(session.filter, .all)
-        XCTAssertEqual(session.count, 2)
-        XCTAssertEqual(session.currentFile.url.lastPathComponent, "a.cr2")
+        XCTAssertEqual(session.filter, .flagged)
+        XCTAssertEqual(session.count, 0)
+        XCTAssertTrue(session.isEmpty)
+        XCTAssertEqual(session.currentIndex, 0)
     }
 
-    func testFilterEmptyProjectionKeepsMidListCurrentPhoto() {
+    func testFilterEmptyProjectionShowsEmpty() {
         let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2", "e.cr2"]))
         session.setIndex(2)               // current = c
         session.toggleFlag()              // flag c
         session.setFilter(.flagged)       // [c], current = c
         session.toggleFlag()              // unflag c: projection empties -> All, current = c
-        session.setFilter(.flagged)       // still nothing flagged: empty again
         XCTAssertEqual(session.filter, .all)
         XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
-        XCTAssertEqual(session.currentIndex, 2)
+        session.setFilter(.flagged)       // still nothing flagged: empty placeholder
+        XCTAssertEqual(session.filter, .flagged)
+        XCTAssertEqual(session.count, 0)
+        XCTAssertTrue(session.isEmpty)
     }
 
     // MARK: Filter interplay
