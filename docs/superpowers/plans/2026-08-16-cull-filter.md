@@ -134,6 +134,18 @@ xcrun xctest -XCTest SessionTests /tmp/qc-dd/Build/Products/Debug/QuickCullCoreT
         XCTAssertEqual(session.count, 2)
         XCTAssertEqual(session.currentFile.url.lastPathComponent, "a.cr2")
     }
+
+    func testFilterEmptyProjectionKeepsMidListCurrentPhoto() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2", "e.cr2"]))
+        session.setIndex(2)               // current = c
+        session.toggleFlag()              // flag c
+        session.setFilter(.flagged)       // [c], current = c
+        session.toggleFlag()              // unflag c: projection empties -> All, current = c
+        session.setFilter(.flagged)       // still nothing flagged: empty again
+        XCTAssertEqual(session.filter, .all)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
+        XCTAssertEqual(session.currentIndex, 2)
+    }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -224,9 +236,14 @@ Add a `// MARK: Filtering` section after `setIndex(_:)`:
     public func setFilter(_ filter: CullFilter) {
         let newFiles = projection(for: filter)
         guard !newFiles.isEmpty else {
+            // Capture the current photo BEFORE replacing `files`: the
+            // projection index and the full-list position differ whenever a
+            // filter is active, so reading `currentFile` after the swap
+            // would look up `allFiles[currentIndex]` — a different photo.
+            let currentID = currentFile.id
             self.filter = .all
             files = allFiles
-            if let idx = allFiles.firstIndex(where: { $0.id == currentFile.id }) {
+            if let idx = allFiles.firstIndex(where: { $0.id == currentID }) {
                 currentIndex = idx
             }
             return
