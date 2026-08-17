@@ -111,10 +111,28 @@ public final class Session {
         return best
     }
 
-    public func toggleFlag() {
-        guard !files.isEmpty else { return }
+    /// Toggles the current photo's reject flag. Under a non-All filter the
+    /// flip always drops the photo out of the visible sequence, so the next
+    /// match takes its place (index clamped at the end); if the sequence
+    /// empties entirely the filter falls back to All, keeping the photo.
+    /// Returns whether the visible sequence changed (always false in All
+    /// mode).
+    @discardableResult
+    public func toggleFlag() -> Bool {
+        guard !files.isEmpty else { return false }
         let id = currentFile.id
         if flagged.contains(id) { flagged.remove(id) } else { flagged.insert(id) }
+        guard filter != .all else { return false }
+        let newFiles = projection(for: filter)
+        if newFiles.isEmpty {
+            filter = .all
+            files = allFiles
+            if let idx = allFiles.firstIndex(where: { $0.id == id }) { currentIndex = idx }
+        } else {
+            files = newFiles
+            currentIndex = min(currentIndex, newFiles.count - 1)
+        }
+        return true
     }
 
     public func isFlagged(_ file: SessionFile) -> Bool {
@@ -123,21 +141,46 @@ public final class Session {
 
     public var flaggedCount: Int { flagged.count }
 
+    /// Flagged files from the FULL session list: under the Keepers filter
+    /// the flagged files are not visible, and commit must still find them.
     public var flaggedFiles: [SessionFile] {
-        files.filter { flagged.contains($0.id) }
+        allFiles.filter { flagged.contains($0.id) }
     }
 
     /// Remove trashed files after a successful commit. All flags are cleared
     /// (flagged files are exactly the ones being removed). The current photo
-    /// is preserved: if files before it were removed, the index shifts back
-    /// by that count so `currentFile` does not silently change.
+    /// is preserved: after removal the first survivor at or after its old
+    /// position becomes current, or the last survivor when none follows —
+    /// exactly the pre-filter index-shift behavior in All mode, generalized
+    /// to the projection. A commit that empties the visible sequence while
+    /// files remain (e.g. every flagged photo committed in Flagged mode)
+    /// falls back to All, landing on the first file.
     public func remove(_ filesToRemove: [SessionFile]) {
         let ids = Set(filesToRemove.map(\.id))
-        let removedBeforeCurrent = files.enumerated()
-            .filter { $0.offset < currentIndex && ids.contains($0.element.id) }
-            .count
+        let original = allFiles
+        let currentPos = original.firstIndex(where: { $0.id == currentFile.id }) ?? 0
         flagged.subtract(ids)
-        files.removeAll { ids.contains($0.id) }
-        currentIndex = min(max(currentIndex - removedBeforeCurrent, 0), max(files.count - 1, 0))
+        allFiles.removeAll { ids.contains($0.id) }
+        files = projection(for: filter)
+        guard !files.isEmpty else {
+            currentIndex = 0
+            if !allFiles.isEmpty {
+                filter = .all
+                files = allFiles
+            }
+            return
+        }
+        // First survivor at or after the old current position (today's
+        // index-shift semantics, generalized to the projection); else the
+        // last survivor. Positions are the ORIGINAL full-list ones: the
+        // projection preserves full-list order, and `files` is a
+        // subsequence of `allFiles` at every point.
+        let originalPositions = Dictionary(uniqueKeysWithValues: original.enumerated().map { ($0.element.id, $0.offset) })
+        if let survivor = files.first(where: { (originalPositions[$0.id] ?? 0) >= currentPos }),
+           let idx = files.firstIndex(where: { $0.id == survivor.id }) {
+            currentIndex = idx
+        } else {
+            currentIndex = files.count - 1
+        }
     }
 }

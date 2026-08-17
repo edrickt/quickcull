@@ -174,4 +174,89 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(session.currentIndex, 2)
     }
 
+    // MARK: Filter interplay
+
+    func testToggleFlagInFlaggedModeAdvances() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.toggleFlag()              // flag a
+        session.move(by: 1)
+        session.toggleFlag()              // flag b
+        session.setFilter(.flagged)       // [a, b], current = b
+        session.toggleFlag()              // unflag b: drops out, a takes over
+        XCTAssertEqual(session.count, 1)
+        XCTAssertEqual(session.files.map(\.url.lastPathComponent), ["a.cr2"])
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "a.cr2")
+        XCTAssertTrue(session.isFlagged(session.currentFile))
+    }
+
+    func testToggleFlagInKeepersModeAdvances() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.toggleFlag()              // flag a
+        session.setFilter(.keepers)       // [b, c], current = b
+        session.toggleFlag()              // flag b: drops out, c takes over
+        XCTAssertEqual(session.count, 1)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
+        XCTAssertEqual(session.flaggedCount, 2)
+    }
+
+    func testUnflaggingLastVisibleResetsToAll() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
+        session.toggleFlag()              // flag a
+        session.setFilter(.flagged)       // [a]
+        session.toggleFlag()              // unflag a: projection empties
+        XCTAssertEqual(session.filter, .all)
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "a.cr2")  // kept by id
+        XCTAssertEqual(session.flaggedCount, 0)
+    }
+
+    func testRemoveUnderKeepersFilterKeepsCurrent() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        let all = session.files
+        session.toggleFlag()              // flag a
+        session.setFilter(.keepers)       // [b, c], current = b
+        session.remove([all[0]])          // trash flagged a (not visible)
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.files.map(\.url.lastPathComponent), ["b.cr2", "c.cr2"])
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "b.cr2")
+        XCTAssertEqual(session.totalCount, 2)
+    }
+
+    func testRemoveAllVisibleUnderFlaggedFilterResetsToAll() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        let all = session.files
+        session.toggleFlag()              // flag a
+        session.move(by: 1)
+        session.toggleFlag()              // flag b
+        session.setFilter(.flagged)       // [a, b], current = b
+        session.remove([all[0], all[1]])  // commit trashes both flagged
+        XCTAssertEqual(session.filter, .all)
+        XCTAssertEqual(session.count, 1)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")  // first remaining
+    }
+
+    func testFlaggedFilesComesFromFullListUnderKeepers() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
+        let all = session.files
+        session.toggleFlag()              // flag a
+        session.setFilter(.keepers)       // a is not visible
+        XCTAssertEqual(session.flaggedFiles.map(\.id), [all[0].id])
+    }
+
+    func testRemoveCurrentLandsOnNextSurvivor() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"]))
+        session.setIndex(2)               // current = c
+        session.remove([session.files[2]])
+        XCTAssertEqual(session.count, 3)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "d.cr2")
+    }
+
+    func testRemoveCurrentAtEndLandsOnLastSurvivor() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.setIndex(2)               // current = c
+        session.remove([session.files[2]])
+        XCTAssertEqual(session.count, 2)
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "b.cr2")
+    }
+
 }
