@@ -3,6 +3,10 @@ import QuickCullCore
 
 struct ImageDisplayView: View {
     @Environment(AppState.self) private var appState
+    @Binding var zoomScale: CGFloat
+    @Binding var zoomLastScale: CGFloat
+    @Binding var zoomOffset: CGSize
+    @Binding var zoomLastOffset: CGSize
 
     var body: some View {
         let index = appState.session?.currentIndex ?? 0
@@ -19,27 +23,168 @@ struct ImageDisplayView: View {
             if appState.session?.files.isEmpty == true {
                 // Filter matches nothing (Flagged 0 or Keepers 0) — nothing to load, show empty black instead of spinner
                 Color.black
-            } else if let image = appState.displayImages?.image(at: index) {
-                Image(decorative: image, scale: 1)
-                    .resizable()
-                    .scaledToFit()
-                    .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
-            } else if let thumb = appState.thumbWindow?.image(at: index) {
-                // The display-size decode (~100-400 ms for a 45 MP cache
-                // entry) lags fast scrubbing. Show the already-resident
-                // same-index thumbnail upscaled so the current photo is
-                // visible immediately; the sharp image replaces it when the
-                // decode lands. Same index = same photo, never a wrong image.
-                // The badge must render here too: a marked photo shown
-                // without its badge reads as unflagged.
-                Image(decorative: thumb, scale: 1)
-                    .resizable()
-                    .scaledToFit()
-                    .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
+            } else if let cgImage = appState.displayImages?.image(at: index) ?? appState.thumbWindow?.image(at: index) {
+                // Zoomable viewer: pinch to zoom, double-click toggles 1x / 2x, drag to pan when zoomed.
+                // Zoom persists across images in single-view scrub (scale kept, pan re-centers).
+                // Thumb->display upgrade for the same file keeps both zoom and pan (same id).
+                ZoomableImageView(
+                    cgImage: cgImage,
+                    fileID: currentFile?.id,
+                    scale: $zoomScale,
+                    lastScale: $zoomLastScale,
+                    offset: $zoomOffset,
+                    lastOffset: $zoomLastOffset
+                )
+                .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
             } else {
                 ProgressView().controlSize(.large)
             }
         }
+    }
+}
+
+/// Zoomable container for the main viewer image.
+/// - Pinch (trackpad) scales 1x…4x.
+/// - Double-click toggles fit (1x) ↔ 200% (2x). Any zoomed state double-click unzooms.
+/// - Drag pans when zoomed, clamped so the image never leaves the viewport.
+private struct ZoomableImageView: View {
+    let cgImage: CGImage
+    let fileID: String?
+
+    @Binding var scale: CGFloat
+    @Binding var lastScale: CGFloat
+    @Binding var offset: CGSize
+    @Binding var lastOffset: CGSize
+
+    var body: some View {
+        GeometryReader { geo in
+            let container = geo.size
+            let fitted = fittedSize(for: cgImage, in: container)
+            ZStack {
+                Color.black
+                Image(decorative: cgImage, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: fitted.width, height: fitted.height)
+                    .scaleEffect(scale)
+                    .offset(offset)
+            }
+            .frame(width: container.width, height: container.height)
+            .contentShape(Rectangle())
+            .clipped()
+            .onTapGesture(count: 2) {
+                handleDoubleClick()
+            }
+            .gesture(magnificationGesture(container: container, fitted: fitted))
+            .simultaneousGesture(dragGesture(container: container, fitted: fitted))
+            .onChange(of: fileID) { _, _ in
+                // Persist zoom scale across images; re-center pan for the new photo.
+                // Keep scale/lastScale, reset offset so each new image appears centered
+                // at the same magnification (avoids leftover pan pushing new image out of bounds
+                // when aspect changes). Thumb->display for same fileID does not trigger this.
+                offset = .zero
+                lastOffset = .zero
+            }
+            .onChange(of: container.width) { _, _ in
+                guard scale > 1.01 else { return }
+                let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
+                if clamped != offset { offset = clamped; lastOffset = clamped }
+            }
+            .onChange(of: container.height) { _, _ in
+                guard scale > 1.01 else { return }
+                let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
+                if clamped != offset { offset = clamped; lastOffset = clamped }
+            }
+        }
+    }
+
+    // MARK: - Gestures
+
+    private func magnificationGesture(container: CGSize, fitted: CGSize) -> some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                let newScale = lastScale * value
+                let clamped = min(max(newScale, 1), 4)
+                scale = clamped
+                if clamped <= 1.01 {
+                    offset = .zero
+                } else {
+                    offset = clampedOffset(offset, container: container, fitted: fitted, scale: clamped)
+                }
+            }
+            .onEnded { _ in
+                lastScale = scale
+                if scale <= 1.01 {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        scale = 1
+                        offset = .zero
+                    }
+                    lastScale = 1
+                    lastOffset = .zero
+                } else {
+                    offset = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
+                    lastOffset = offset
+                }
+            }
+    }
+
+    private func dragGesture(container: CGSize, fitted: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .local)
+            .onChanged { val in
+                guard scale > 1.01 else { return }
+                let new = CGSize(
+                    width: lastOffset.width + val.translation.width,
+                    height: lastOffset.height + val.translation.height
+                )
+                offset = clampedOffset(new, container: container, fitted: fitted, scale: scale)
+            }
+            .onEnded { _ in
+                lastOffset = offset
+            }
+    }
+
+    private func handleDoubleClick() {
+        if scale > 1.01 {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scale = 1
+                offset = .zero
+            }
+            lastScale = 1
+            lastOffset = .zero
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                scale = 2
+                offset = .zero
+            }
+            lastScale = 2
+            lastOffset = .zero
+        }
+    }
+
+    // MARK: - Math
+
+    private func fittedSize(for image: CGImage, in container: CGSize) -> CGSize {
+        guard container.width > 0, container.height > 0 else { return .zero }
+        let imageAspect = CGFloat(image.width) / CGFloat(image.height)
+        let containerAspect = container.width / container.height
+        if imageAspect > containerAspect {
+            let w = container.width
+            return CGSize(width: w, height: w / imageAspect)
+        } else {
+            let h = container.height
+            return CGSize(width: h * imageAspect, height: h)
+        }
+    }
+
+    private func clampedOffset(_ off: CGSize, container: CGSize, fitted: CGSize, scale: CGFloat) -> CGSize {
+        let scaledW = fitted.width * scale
+        let scaledH = fitted.height * scale
+        let maxX = max((scaledW - container.width) / 2, 0)
+        let maxY = max((scaledH - container.height) / 2, 0)
+        return CGSize(
+            width: min(max(off.width, -maxX), maxX),
+            height: min(max(off.height, -maxY), maxY)
+        )
     }
 }
 

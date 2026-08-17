@@ -5,6 +5,14 @@ struct ScrubView: View {
     @Environment(AppState.self) private var appState
     @State private var showCommitConfirm = false
     @State private var showCommitFailures = false
+    // Zoom persists across images while staying in single-view mode, but
+    // resets when leaving single (to grid) so a grid round-trip never
+    // restores a stale 200% zoom. Hoisted here because ImageDisplayView is
+    // recreated on viewMode toggle.
+    @State private var zoomScale: CGFloat = 1
+    @State private var zoomLastScale: CGFloat = 1
+    @State private var zoomOffset: CGSize = .zero
+    @State private var zoomLastOffset: CGSize = .zero
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,7 +22,12 @@ struct ScrubView: View {
             if appState.viewMode == .grid {
                 GridView()
             } else {
-                ImageDisplayView()
+                ImageDisplayView(
+                    zoomScale: $zoomScale,
+                    zoomLastScale: $zoomLastScale,
+                    zoomOffset: $zoomOffset,
+                    zoomLastOffset: $zoomLastOffset
+                )
                 Divider()
                 FilmstripView()
             }
@@ -74,6 +87,30 @@ struct ScrubView: View {
         .onChange(of: appState.commitFailures.count) {
             if appState.commitFailures.count > 0 { showCommitFailures = true }
         }
+        .onChange(of: appState.phase) { _, newPhase in
+            // New import or empty session: reset zoom to fit so a stale 200% does not surprise the next shoot.
+            if newPhase == .empty || isDecoding(newPhase) {
+                zoomScale = 1
+                zoomLastScale = 1
+                zoomOffset = .zero
+                zoomLastOffset = .zero
+            }
+        }
+        .onChange(of: appState.viewMode) { oldMode, newMode in
+            // Grid round-trip must not restore zoom: zoom persists only while staying in single.
+            // Reset on any toggle so Single→Grid→Single lands at fit.
+            if oldMode != newMode {
+                zoomScale = 1
+                zoomLastScale = 1
+                zoomOffset = .zero
+                zoomLastOffset = .zero
+            }
+        }
+    }
+
+    private func isDecoding(_ phase: AppPhase) -> Bool {
+        if case .decoding = phase { return true }
+        return false
     }
 
     /// Import failures are set before the decoding → scrubbing transition,
