@@ -15,6 +15,10 @@ public enum AppPhase: Equatable {
 @Observable
 public final class AppState {
     public private(set) var phase: AppPhase = .empty
+    public enum ViewMode: Equatable, Sendable { case scrub, grid }
+    public private(set) var viewMode: ViewMode = .scrub
+    public private(set) var gridSelection: Set<String> = []
+    private var gridAnchorID: String?
     public private(set) var session: Session?
     public private(set) var importFailures: [DecodeOutcome] = []
     public private(set) var commitFailures: [TrashOutcome] = []
@@ -45,6 +49,9 @@ public final class AppState {
 
     /// Import: validate + dedupe, then Phase 1 (decode everything), then scrub.
     public func importFiles(urls: [URL]) {
+        viewMode = .scrub
+        gridSelection = []
+        gridAnchorID = nil
         let unique = Array(Set(urls.map(\.standardizedFileURL))).sorted { $0.path < $1.path }
         let supported = unique.filter(RawFileIdentity.isSupported)
         guard !supported.isEmpty else {
@@ -85,6 +92,9 @@ public final class AppState {
                         // Flags are empty at this point, so remove() only
                         // drops the files (and shifts the index correctly).
                         session?.remove(failed)
+                        if let s = session {
+                            gridSelection = gridSelection.filter { s.contains(id: $0) }
+                        }
                     }
                     if session?.isEmpty == true {
                         // All failed: back to the empty state; its banner
@@ -129,15 +139,21 @@ public final class AppState {
         case .jumpForward: session.move(by: 10)
         case .jumpBack: session.move(by: -10)
         case .toggleFlag:
-            // A flag flip under a non-All filter changes the visible
-            // sequence (the photo drops out / the filter falls back to
-            // All), so the windows must be rebuilt over the new
-            // projection. In All mode the sequence is unchanged and the
-            // windows stay put.
-            if session.toggleFlag() {
-                installWindows(for: session.files)
+            if viewMode == .grid && !gridSelection.isEmpty {
+                let changed = session.toggleFlags(ids: gridSelection)
+                if changed { installWindows(for: session.files) } else { syncWindows() }
+                gridSelection = gridSelection.filter { session.contains(id: $0) }
             } else {
-                syncWindows()
+                // A flag flip under a non-All filter changes the visible
+                // sequence (the photo drops out / the filter falls back to
+                // All), so the windows must be rebuilt over the new
+                // projection. In All mode the sequence is unchanged and the
+                // windows stay put.
+                if session.toggleFlag() {
+                    installWindows(for: session.files)
+                } else {
+                    syncWindows()
+                }
             }
         }
         syncWindows()
@@ -160,6 +176,51 @@ public final class AppState {
         installWindows(for: session.files)
     }
 
+    public func setViewMode(_ mode: ViewMode) {
+        guard phase == .scrubbing else { return }
+        guard viewMode != mode else { return }
+        viewMode = mode
+    }
+
+    public func selectSingle(id: String) {
+        gridSelection = [id]
+        gridAnchorID = id
+    }
+
+    public func toggleSelection(id: String) {
+        if gridSelection.contains(id) { gridSelection.remove(id) }
+        else { gridSelection.insert(id) }
+    }
+
+    public func selectRange(to targetID: String) {
+        guard let anchor = gridAnchorID,
+              let session,
+              let anchorIdx = session.files.firstIndex(where: { $0.id == anchor }),
+              let targetIdx = session.files.firstIndex(where: { $0.id == targetID }) else {
+            selectSingle(id: targetID); return
+        }
+        let lo = min(anchorIdx, targetIdx), hi = max(anchorIdx, targetIdx)
+        let rangeIDs = session.files[lo...hi].map(\.id)
+        gridSelection.formUnion(rangeIDs)
+    }
+
+    public func handleGridTap(id: String, isCmd: Bool, isShift: Bool) {
+        if isShift { selectRange(to: id) }
+        else if isCmd { toggleSelection(id: id) }
+        else { selectSingle(id: id) }
+        if let idx = session?.files.firstIndex(where: { $0.id == id }) {
+            session?.setIndex(idx)
+            syncWindows()
+        }
+    }
+
+    public func handleGridDoubleClick(id: String) {
+        guard !isCommitting, let idx = session?.files.firstIndex(where: { $0.id == id }) else { return }
+        session?.setIndex(idx)
+        syncWindows()
+        viewMode = .scrub
+    }
+
     private func syncWindows() {
         guard let session else { return }
         thumbWindow?.setCurrent(session.currentIndex)
@@ -179,6 +240,7 @@ public final class AppState {
         }.value
         let succeeded = outcomes.filter(\.succeeded).map(\.file)
         session.remove(succeeded)
+        gridSelection = gridSelection.filter { session.contains(id: $0) }
         commitFailures = outcomes.filter { !$0.succeeded }
         pendingCommitCount = 0
         isCommitting = false

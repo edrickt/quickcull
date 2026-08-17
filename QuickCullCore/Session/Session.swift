@@ -179,6 +179,10 @@ public final class Session {
         flagged.contains(file.id)
     }
 
+    public func contains(id: String) -> Bool {
+        allFiles.contains { $0.id == id }
+    }
+
     public var flaggedCount: Int { flagged.count }
 
     /// Flagged files from the FULL session list: under the Keepers filter

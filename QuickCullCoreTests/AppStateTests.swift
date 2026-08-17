@@ -382,4 +382,81 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.thumbWindow?.count, 8)
     }
 
+    func testViewModeDefaultsScrubAndResetsOnImport() async throws {
+        let files = try (0..<2).map { try TestFixtures.makeRawFile(named: "v\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+        XCTAssertEqual(state.viewMode, .scrub)
+        state.setViewMode(.grid)
+        XCTAssertEqual(state.viewMode, .grid)
+        // new import resets
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        state.importFiles(urls: [b])
+        await waitForScrubbing(state)
+        XCTAssertEqual(state.viewMode, .scrub)
+        XCTAssertTrue(state.gridSelection.isEmpty)
+    }
+
+    func testGridSelectionSingleCmdShiftRange() async throws {
+        let files = try (0..<5).map { try TestFixtures.makeRawFile(named: "g\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+        let ids = state.session!.files.map(\.id)
+        state.selectSingle(id: ids[1])
+        XCTAssertEqual(state.gridSelection, [ids[1]])
+        state.toggleSelection(id: ids[3])
+        XCTAssertEqual(state.gridSelection, [ids[1], ids[3]])
+        state.selectRange(to: ids[4]) // anchor was ids[1], range 1...4
+        XCTAssertEqual(state.gridSelection, Set([ids[1], ids[2], ids[3], ids[4]]))
+        state.selectSingle(id: ids[0])
+        XCTAssertEqual(state.gridSelection, [ids[0]])
+    }
+
+    func testHandleToggleFlagInGridBatchesSelection() async throws {
+        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "h\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+        state.setViewMode(.grid)
+        let ids = state.session!.files.map(\.id)
+        state.selectSingle(id: ids[0])
+        state.toggleSelection(id: ids[2])
+        state.handle(.toggleFlag) // should batch-flag 0 and 2
+        XCTAssertEqual(state.session?.flaggedCount, 2)
+        XCTAssertTrue(state.session!.isFlagged(state.session!.files[0]))
+        XCTAssertEqual(state.gridSelection, Set([ids[0], ids[2]]))
+    }
+
+    func testHandleToggleFlagInGridEmptyFallsBackToSingle() async throws {
+        let files = try (0..<2).map { try TestFixtures.makeRawFile(named: "e\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+        state.setViewMode(.grid)
+        XCTAssertTrue(state.gridSelection.isEmpty)
+        state.handle(.toggleFlag) // no selection → flags current (index 0)
+        XCTAssertEqual(state.session?.flaggedCount, 1)
+    }
+
+    func testGridSelectionPrunedAfterCommitAndFilter() async throws {
+        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "p\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+        let ids = state.session!.files.map(\.id)
+        state.setViewMode(.grid)
+        state.selectSingle(id: ids[0])
+        state.toggleSelection(id: ids[1])
+        state.handle(.toggleFlag) // flag 0,1
+        state.setFilter(.keepers) // grid now shows only [2]; selection ghosts remain
+        XCTAssertEqual(state.gridSelection, Set([ids[0], ids[1]]))
+        // commit removes flagged 0,1 → selection pruned to empty
+        state.requestCommit()
+        await state.confirmCommit()
+        XCTAssertTrue(state.gridSelection.isEmpty)
+        XCTAssertEqual(state.session?.count, 1)
+    }
+
 }
