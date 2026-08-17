@@ -25,38 +25,32 @@ struct ImageDisplayView: View {
                 // Filter matches nothing (Flagged 0 or Keepers 0) — nothing to load, show empty black instead of spinner
                 Color.black
             } else if let cgImage = appState.displayImages?.image(at: index) ?? appState.thumbWindow?.image(at: index) {
-                // Zoomable viewer: pinch to zoom, double-click toggles 1x / 2x, drag to pan when zoomed.
-                // Zoom persists across images in single-view scrub (scale kept, pan re-centers).
-                // Thumb->display upgrade for the same file keeps both zoom and pan (same id).
-                ZoomableImageView(
-                    cgImage: cgImage,
-                    fileID: currentFile?.id,
-                    scale: $zoomScale,
-                    lastScale: $zoomLastScale,
-                    offset: $zoomOffset,
-                    lastOffset: $zoomLastOffset
-                )
-                .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
-                .overlay(alignment: .leading) {
+                HStack(spacing: 0) {
                     if hudVisible, let file = currentFile {
-                        GeometryReader { geo in
-                            HStack(spacing: 0) {
-                                MetadataHUDView(file: file, cgImage: cgImage)
-                                    .frame(width: 240)
-                                    .background(.ultraThinMaterial)
-                                    .overlay(Rectangle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5), alignment: .trailing)
-                                    .transition(.move(edge: .leading).combined(with: .opacity))
-                                    .allowsHitTesting(true)
-                                    .contentShape(Rectangle())
-                                Spacer(minLength: 0)
-                                    .allowsHitTesting(false)
-                            }
-                            .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
-                        }
+                        MetadataHUDView(file: file, cgImage: cgImage)
+                            .frame(width: 240)
+                            .background(.ultraThinMaterial)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                        Divider() // 1pt separator, only when HUD shown
                     }
+                    GeometryReader { geo in
+                        ZStack {
+                            Color.black
+                            ZoomableImageView(
+                                cgImage: cgImage,
+                                fileID: currentFile?.id,
+                                scale: $zoomScale,
+                                lastScale: $zoomLastScale,
+                                offset: $zoomOffset,
+                                lastOffset: $zoomLastOffset
+                            )
+                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                    }
+                    .clipped()
                 }
+                .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
                 .animation(.easeInOut(duration: 0.2), value: hudVisible)
-                .clipped()
             } else {
                 ProgressView().controlSize(.large)
             }
