@@ -15,7 +15,7 @@ public enum AppPhase: Equatable {
 @Observable
 public final class AppState {
     public private(set) var phase: AppPhase = .empty
-    public enum ViewMode: Equatable, Sendable { case scrub, grid }
+    public enum ViewMode: Equatable, Sendable { case scrub, split, grid }
     public private(set) var viewMode: ViewMode = .scrub
     public private(set) var gridSelection: Set<String> = []
     private var gridAnchorID: String?
@@ -267,6 +267,9 @@ public final class AppState {
         guard let session else { return }
         thumbWindow?.setCurrent(session.currentIndex)
         displayImages?.setCurrent(session.currentIndex)
+        // Ensure right pane (current+1) is also in-flight when in Split and at edge
+        // (radius 1 already covers current±1, but at last index right is nil; no extra work needed)
+        // Optional: if radius were tight, ensureLoaded would be called, but radius 1 suffices.
     }
 
     public func requestCommit() {

@@ -547,4 +547,47 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.phase, .empty)
         XCTAssertNil(state.session)
     }
+
+    func testSplitViewModeToggleAndShift() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let c = try TestFixtures.makeRawFile(named: "c.cr2", in: tempDir)
+        let state = makeState()
+        state.importFiles(urls: [a, b, c])
+        await waitForScrubbing(state)
+        XCTAssertEqual(state.viewMode, .scrub)
+        state.setViewMode(.split)
+        XCTAssertEqual(state.viewMode, .split)
+        // Split second index is current+1 when exists
+        XCTAssertEqual(state.session?.currentIndex, 0)
+        let second = state.session!.files.indices.contains(1) ? state.session!.files[1].id : nil
+        XCTAssertNotNil(second)
+        // Both shift by 1 overlapping
+        state.handle(.next) // current 0→1
+        XCTAssertEqual(state.session?.currentIndex, 1)
+        // Right preview now c (index 2)
+        XCTAssertEqual(state.session?.files[state.session!.currentIndex + 1].url.lastPathComponent, "c.cr2")
+        // At last, right should be nil placeholder (view computes)
+        state.handle(.next) // 1→2 last
+        XCTAssertEqual(state.session?.currentIndex, 2)
+        // Next beyond last clamps (move does not exceed)
+        state.handle(.next)
+        XCTAssertEqual(state.session?.currentIndex, 2)
+        // Toggle Split disabled while committing
+        state.requestCommit()
+        // Simulate isCommitting true via flagged commit path? Just test setViewMode guard:
+        // isCommitting is false initially; after requestCommit without confirm, still false so not testable here.
+    }
+
+    func testSplitViewModeResetOnNewSession() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let state = makeState()
+        state.importFiles(urls: [a])
+        await waitForScrubbing(state)
+        state.setViewMode(.split)
+        XCTAssertEqual(state.viewMode, .split)
+        state.startNewSession()
+        XCTAssertEqual(state.viewMode, .scrub) // AppState.startNewSession resets to scrub
+        XCTAssertEqual(state.phase, .empty)
+    }
 }
