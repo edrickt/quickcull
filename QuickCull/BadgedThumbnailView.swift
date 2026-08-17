@@ -14,7 +14,7 @@ struct BadgedThumbnailView: View {
     var body: some View {
         Group {
             if let image {
-                Color.black
+                Color.clear
                     .frame(width: size.width, height: size.height)
                     .overlay {
                         Image(decorative: image, scale: 2)
