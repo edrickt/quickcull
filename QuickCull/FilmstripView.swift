@@ -32,12 +32,16 @@ struct FilmstripView: View {
         let files = appState.session?.files ?? []
         let flagged = appState.session?.flagged ?? []
         let currentIndex = appState.session?.currentIndex ?? 0
+        // Track which thumbnails have loaded: a badge must wait for its
+        // photo — it belongs to the image, not to the placeholder box.
+        let loadedImages = appState.thumbWindow?.images ?? [:]
         let flagVersion = flagged.sorted().joined(separator: ",") + "|\(currentIndex)"
         let elements = files.enumerated().map { index, file in
             (key: stripKey(file, flagVersion: flagVersion),
              index: index,
              file: file,
-             isFlagged: flagged.contains(file.id))
+             isFlagged: flagged.contains(file.id),
+             hasImage: loadedImages[index] != nil)
         }
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
@@ -47,6 +51,10 @@ struct FilmstripView: View {
                 // rapid flag toggling, leaving some badges stuck absent.
                 // One canvas view redraws ALL badges from the current data
                 // in a single commit — nothing to drop.
+                //
+                // A badge draws only for a cell that HAS its image: the
+                // badge belongs to the photo, never to the empty
+                // placeholder box it will land on.
                 ZStack(alignment: .topLeading) {
                     LazyHStack(spacing: 3) {
                         // Iterate the files themselves, keyed by stable file id.
@@ -98,11 +106,14 @@ struct FilmstripView: View {
 /// positions mirror the cell layout (100 pt cells, 3 pt spacing, 6 pt
 /// padding, 24 pt badge in each cell's top-right corner).
 private struct FlagBadgeCanvas: View {
-    let elements: [(key: String, index: Int, file: SessionFile, isFlagged: Bool)]
+    let elements: [(key: String, index: Int, file: SessionFile, isFlagged: Bool, hasImage: Bool)]
 
     var body: some View {
         Canvas { context, size in
-            for element in elements where element.isFlagged {
+            // The badge belongs to the photo: draw it only for a flagged
+            // cell whose image has actually loaded, so it never sits on
+            // the empty placeholder box (the container).
+            for element in elements where element.isFlagged && element.hasImage {
                 let x = CGFloat(6 + element.index * 103 + 76)
                 let y = CGFloat(6)
                 let rect = CGRect(x: x, y: y, width: 24, height: 24)
