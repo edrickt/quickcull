@@ -39,13 +39,19 @@ struct ImageDisplayView: View {
                 .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
                 .overlay(alignment: .leading) {
                     if hudVisible, let file = currentFile {
-                        HStack(spacing: 0) {
-                            MetadataHUDView(file: file, cgImage: cgImage)
-                                .frame(width: 240)
-                                .background(.ultraThinMaterial)
-                                .overlay(Rectangle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5), alignment: .trailing)
-                                .transition(.move(edge: .leading).combined(with: .opacity))
-                            Spacer(minLength: 0)
+                        GeometryReader { geo in
+                            HStack(spacing: 0) {
+                                MetadataHUDView(file: file, cgImage: cgImage)
+                                    .frame(width: 240)
+                                    .background(.ultraThinMaterial)
+                                    .overlay(Rectangle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5), alignment: .trailing)
+                                    .transition(.move(edge: .leading).combined(with: .opacity))
+                                    .allowsHitTesting(true)
+                                    .contentShape(Rectangle())
+                                Spacer(minLength: 0)
+                                    .allowsHitTesting(false)
+                            }
+                            .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
                         }
                     }
                 }
@@ -216,13 +222,18 @@ private struct MetadataHUDView: View {
                         Text(row.label).font(.caption2).foregroundStyle(.secondary)
                         Text(row.value).font(.caption).foregroundStyle(.primary)
                             .lineLimit(1).truncationMode(.middle)
-                            .help(row.value)
+                            .help(row.label == "File" ? (metadata?.filePath ?? row.value) : row.value)
                     }
                 }
             }
             .padding(10)
         }
-        .task(id: file.id) {
+        // Compound task id includes cgImage dimensions so thumb (320px) → full-res upgrade reruns
+        // and updates dimensions; detached utility task runs file I/O off main.
+        // Note: Task.detached is not a child of the outer .task, so cancellation of the outer
+        // task (on rapid scrub) does not automatically cancel the detached work; the outer
+        // .task discards its result when cancelled and only the latest file/dimensions wins.
+        .task(id: "\(file.id)-\(cgImage?.width ?? 0)x\(cgImage?.height ?? 0)") {
             metadata = await Task.detached(priority: .utility) {
                 ImageMetadataProvider.metadata(for: file, cgImage: cgImage)
             }.value
