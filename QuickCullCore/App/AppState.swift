@@ -150,7 +150,9 @@ public final class AppState {
             if viewMode == .grid && !gridSelection.isEmpty {
                 let changed = session.toggleFlags(ids: gridSelection)
                 if changed { installWindows(for: session.files) } else { syncWindows() }
-                gridSelection = gridSelection.filter { session.contains(id: $0) }
+                // Deselect after any flag action: Ctrl+A + Z should not stay highlighted
+                gridSelection = []
+                gridAnchorID = nil
             } else {
                 // A flag flip under a non-All filter changes the visible
                 // sequence (the photo drops out / the filter falls back to

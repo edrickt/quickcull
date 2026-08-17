@@ -426,7 +426,7 @@ final class AppStateTests: XCTestCase {
         state.handle(.toggleFlag) // should batch-flag 0 and 2
         XCTAssertEqual(state.session?.flaggedCount, 2)
         XCTAssertTrue(state.session!.isFlagged(state.session!.files[0]))
-        XCTAssertEqual(state.gridSelection, Set([ids[0], ids[2]]))
+        XCTAssertTrue(state.gridSelection.isEmpty, "grid should deselect after any flag action (Ctrl+A + Z should not stay highlighted)")
     }
 
     func testHandleToggleFlagInGridEmptyFallsBackToSingle() async throws {
@@ -449,10 +449,11 @@ final class AppStateTests: XCTestCase {
         state.setViewMode(.grid)
         state.selectSingle(id: ids[0])
         state.toggleSelection(id: ids[1])
-        state.handle(.toggleFlag) // flag 0,1
-        state.setFilter(.keepers) // grid now shows only [2]; selection ghosts remain
-        XCTAssertEqual(state.gridSelection, Set([ids[0], ids[1]]))
-        // commit removes flagged 0,1 → selection pruned to empty
+        state.handle(.toggleFlag) // flag 0,1 -> deselects after flag
+        XCTAssertTrue(state.gridSelection.isEmpty, "deselect after flag")
+        state.setFilter(.keepers) // grid now shows only [2]
+        XCTAssertTrue(state.gridSelection.isEmpty)
+        // commit removes flagged 0,1 → still empty
         state.requestCommit()
         await state.confirmCommit()
         XCTAssertTrue(state.gridSelection.isEmpty)
