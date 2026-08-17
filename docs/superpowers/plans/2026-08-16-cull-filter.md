@@ -10,12 +10,12 @@
 
 ## Global Constraints
 
-- Default filter is `.all`; pre-filter behavior must be bit-for-bit unchanged (existing 69 tests pin this).
-- Filter is per-session state: fresh `Session` per import, always starting at `.all`.
+- Default filter is `.all`; pre-filter behavior must be bit-for-bit unchanged (existing 69 tests pin this).- Filter is per-session state: fresh `Session` per import, always starting at `.all`.
 - Under a non-All filter, a flag toggle always drops the current photo out of the sequence and auto-advances to the next match (index clamped at the end).
 - An empty visible sequence falls back to `.all`: after the last photo drops out, keep that photo current (by id); after a commit empties it, land on the first remaining file.
 - `flaggedFiles` must filter `allFiles` (not the projection) — commit must find flagged files while the Keepers filter hides them.
 - Toolbar control only — no new keyboard shortcut. Filmstrip shows only matching photos (no view changes).
+- Harness build workaround: every `xcodebuild` invocation needs `export TMPDIR=/tmp/qc-tmp CLANG_MODULE_CACHE_PATH=/tmp/qc-modcache` and `OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox"` (see Build / Test Commands; needed because the sandboxed shell can't write `/var/folders` and nested `sandbox-exec` is denied).
 - `CullFilter` is `CaseIterable, Hashable, Sendable` (Hashable required for SwiftUI `Picker` `.tag`).
 - Naming follows the repo: `CullFilter` next to `CullAction`; `allFiles` / `files` / `filter` as in the spec (`docs/superpowers/specs/2026-08-16-cull-filter-design.md`).
 
@@ -29,24 +29,33 @@
 
 ## Build / Test Commands
 
+In this session (DSH harness), the sandboxed shell breaks xcodebuild two ways:
+`/var/folders` is unwritable (clang module cache) and the Swift compiler's
+`sandbox-exec`-wrapped plugin server cannot nest. Every `xcodebuild` run needs
+the workaround below. In a normal Mac shell the extra flags are unnecessary
+but harmless.
+
 Incremental test build (fast; derived data already exists at `/tmp/qc-dd`):
 
 ```bash
+export TMPDIR=/tmp/qc-tmp CLANG_MODULE_CACHE_PATH=/tmp/qc-modcache
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   -configuration Debug -destination 'platform=macOS' \
-  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing
+  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO \
+  OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox" build-for-testing
 ```
 
-Run all tests:
+Run all tests (real baseline: 69 tests, per README and per-source count):
 
 ```bash
 xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
-Run one test class (faster iteration):
+Run one test class (faster iteration; note the option comes BEFORE the bundle
+path — this xctest rejects the other order):
 
 ```bash
-xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest -XCTest SessionTests
+xcrun xctest -XCTest SessionTests /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
 ---
@@ -132,8 +141,9 @@ xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest -XCTest S
 ```bash
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   -configuration Debug -destination 'platform=macOS' \
-  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing \
-  && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest -XCTest SessionTests
+  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO \
+  OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox" build-for-testing \
+  && xcrun xctest -XCTest SessionTests /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
 Expected: FAIL — `CullFilter` unresolved, `filter`/`totalCount`/`setFilter` missing.
@@ -257,8 +267,9 @@ Add a `// MARK: Filtering` section after `setIndex(_:)`:
 ```bash
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   -configuration Debug -destination 'platform=macOS' \
-  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing \
-  && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest -XCTest SessionTests
+  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO \
+  OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox" build-for-testing \
+  && xcrun xctest -XCTest SessionTests /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
 Expected: PASS — all 16 Session tests (10 existing + 6 new).
@@ -379,8 +390,9 @@ git commit -m "feat: session filter projection with setFilter (all/flagged/keepe
 ```bash
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   -configuration Debug -destination 'platform=macOS' \
-  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing \
-  && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest -XCTest SessionTests
+  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO \
+  OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox" build-for-testing \
+  && xcrun xctest -XCTest SessionTests /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
 Expected: FAIL — auto-advance not implemented, `flaggedFiles` empty under Keepers, `remove` semantics off.
@@ -469,11 +481,12 @@ Expected: FAIL — auto-advance not implemented, `flaggedFiles` empty under Keep
 ```bash
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   -configuration Debug -destination 'platform=macOS' \
-  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing \
+  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO \
+  OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox" build-for-testing \
   && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
-Expected: PASS — all 105 tests (97 existing + 8 new). The 5 pre-existing `remove` tests pin today's index-shift semantics; they must pass unmodified.
+Expected: PASS — all 83 tests (75 existing + 8 new). The 5 pre-existing `remove` tests pin today's index-shift semantics; they must pass unmodified.
 
 - [ ] **Step 7: Commit**
 
@@ -561,8 +574,9 @@ git commit -m "feat: flag toggle drops out of filtered sequence; remove reworked
 ```bash
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   -configuration Debug -destination 'platform=macOS' \
-  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing \
-  && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest -XCTest AppStateTests
+  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO \
+  OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox" build-for-testing \
+  && xcrun xctest -XCTest AppStateTests /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
 Expected: FAIL — `setFilter` unresolved.
@@ -601,11 +615,12 @@ Expected: FAIL — `setFilter` unresolved.
 ```bash
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   -configuration Debug -destination 'platform=macOS' \
-  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing \
+  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO \
+  OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox" build-for-testing \
   && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
-Expected: PASS — all 108 tests.
+Expected: PASS — all 86 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -661,11 +676,12 @@ Expected: BUILD SUCCEEDED. (In the DSH harness, add `OTHER_SWIFT_FLAGS='$(inheri
 ```bash
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore \
   -configuration Debug -destination 'platform=macOS' \
-  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing \
+  -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO \
+  OTHER_SWIFT_FLAGS="-Xfrontend -disable-sandbox" build-for-testing \
   && xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 ```
 
-Expected: PASS — all 108 tests.
+Expected: PASS — all 86 tests.
 
 - [ ] **Step 4: Manual verification** — run `./start.sh`, import a folder of photos, and check:
 
