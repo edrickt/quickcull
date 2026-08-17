@@ -1,6 +1,18 @@
 import SwiftUI
 import QuickCullCore
 
+/// Cell identity key for the filmstrip.
+///
+/// The key includes the FULL flag state (every flagged id plus the current
+/// index), not just this cell's own flag: a flag or index change re-keys
+/// the whole strip, so the render pass after a burst of changes re-creates
+/// every cell from the final state. Cell updates that a preempted render
+/// pass dropped (badges stuck absent under rapid flag toggling) cannot
+/// survive: the next pass re-creates the affected cells from scratch.
+private func stripKey(_ file: SessionFile, flagVersion: String) -> String {
+    file.id + "#" + flagVersion
+}
+
 struct FilmstripView: View {
     @Environment(AppState.self) private var appState
     /// Last time the strip scrolled. Used to skip the scroll animation while
@@ -10,43 +22,108 @@ struct FilmstripView: View {
     @State private var lastScrollAt = Date.distantPast
 
     var body: some View {
+        // Read the flag set and index HERE, in the parent's body, not inside
+        // the ForEach closure: reads in the lazy content closure are
+        // attributed to the cell views, whose in-place updates can be
+        // dropped by a preempted render pass (badges stuck absent while the
+        // viewer updates). A parent-body read re-keys the whole strip on
+        // every change AND re-feeds the badge canvas, which redraws every
+        // badge in a single view from the final state.
+        let files = appState.session?.files ?? []
+        let flagged = appState.session?.flagged ?? []
+        let currentIndex = appState.session?.currentIndex ?? 0
+        let flagVersion = flagged.sorted().joined(separator: ",") + "|\(currentIndex)"
+        let elements = files.enumerated().map { index, file in
+            (key: stripKey(file, flagVersion: flagVersion),
+             index: index,
+             file: file,
+             isFlagged: flagged.contains(file.id))
+        }
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                LazyHStack(spacing: 3) {
-                    // Iterate the files themselves, keyed by stable file id.
-                    // Never ForEach(0..<count) with array subscripts in cells:
-                    // when a commit shrinks the session, lazy stacks can
-                    // re-render a surviving cell with a stale range index and
-                    // trap on files[index] (crash).
-                    ForEach(Array((appState.session?.files ?? []).enumerated()),
-                            id: \.element.id) { index, file in
-                        ThumbnailCell(index: index, file: file)
+                // The badges live in a single Canvas layered over the cells
+                // (not inside each cell): a per-cell conditional view's
+                // commit can be dropped by a preempted render pass under
+                // rapid flag toggling, leaving some badges stuck absent.
+                // One canvas view redraws ALL badges from the current data
+                // in a single commit — nothing to drop.
+                ZStack(alignment: .topLeading) {
+                    LazyHStack(spacing: 3) {
+                        // Iterate the files themselves, keyed by stable file id.
+                        // Never ForEach(0..<count) with array subscripts in cells:
+                        // when a commit shrinks the session, lazy stacks can
+                        // re-render a surviving cell with a stale range index and
+                        // trap on files[index] (crash).
+                        ForEach(elements, id: \.key) { element in
+                            ThumbnailCell(index: element.index, file: element.file)
+                        }
                     }
+                    .padding(6)
+                    FlagBadgeCanvas(elements: elements)
                 }
-                .padding(6)
             }
             .frame(height: 86)
             .background(.thinMaterial)
             .onChange(of: appState.session?.currentIndex) {
-                // scrollTo must target the ForEach's identity (the file id),
-                // not the integer index: cells are keyed by file id so a
-                // commit-shrunk session can't re-render a stale index (crash).
+                // scrollTo must target the ForEach's identity (the strip
+                // key), not the integer index: cells are keyed by file id so
+                // a commit-shrunk session can't re-render a stale index
+                // (crash), and the key carries the current flag state.
                 guard let session = appState.session,
                       session.files.indices.contains(session.currentIndex) else { return }
-                let currentID = session.files[session.currentIndex].id
+                let file = session.files[session.currentIndex]
+                let version = session.flagged.sorted().joined(separator: ",") + "|\(session.currentIndex)"
+                let key = stripKey(file, flagVersion: version)
                 let now = Date()
                 let scrubbing = now.timeIntervalSince(lastScrollAt) < 0.15
                 lastScrollAt = now
                 if scrubbing {
                     // Rapid succession (key repeat): jump instantly so the
                     // center cell is always the active one.
-                    proxy.scrollTo(currentID, anchor: .center)
+                    proxy.scrollTo(key, anchor: .center)
                 } else {
                     // Deliberate step/jump after a pause: smooth glide.
-                    withAnimation(.snappy) { proxy.scrollTo(currentID, anchor: .center) }
+                    withAnimation(.snappy) { proxy.scrollTo(key, anchor: .center) }
                 }
             }
         }
+    }
+}
+
+/// Draws every reject-flag badge for the strip in ONE view.
+///
+/// One Canvas = one render commit per state change, so a badge can never
+/// be left stale by a partially-applied update. It sits inside the scroll
+/// content, layered over the cells, so it scrolls with them. Badge
+/// positions mirror the cell layout (100 pt cells, 3 pt spacing, 6 pt
+/// padding, 24 pt badge in each cell's top-right corner).
+private struct FlagBadgeCanvas: View {
+    let elements: [(key: String, index: Int, file: SessionFile, isFlagged: Bool)]
+
+    var body: some View {
+        Canvas { context, size in
+            for element in elements where element.isFlagged {
+                let x = CGFloat(6 + element.index * 103 + 76)
+                let y = CGFloat(6)
+                let rect = CGRect(x: x, y: y, width: 24, height: 24)
+                // Subtle shadow, mirroring FlagBadge.
+                var shadow = context
+                shadow.translateBy(x: 0, y: 0.5)
+                shadow.fill(trianglePath(in: rect), with: .color(.black.opacity(0.35)))
+                context.fill(trianglePath(in: rect), with: .color(.red))
+            }
+        }
+    }
+
+    /// Right isosceles triangle covering the top-right corner (same shape
+    /// as the view's CornerTriangle).
+    private func trianglePath(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -63,9 +140,6 @@ struct ThumbnailCell: View {
                     .scaledToFill()
             } else {
                 Rectangle().fill(.quaternary)
-            }
-            if appState.session?.isFlagged(file) == true {
-                FlagBadge(size: 24)
             }
         }
         .frame(width: 100, height: 64)

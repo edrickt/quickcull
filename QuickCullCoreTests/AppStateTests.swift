@@ -327,7 +327,6 @@ final class AppStateTests: XCTestCase {
         let state = makeState(trasher: trasher)
         state.importFiles(urls: [a, b])
         await waitForScrubbing(state)
-
         state.handle(.toggleFlag)          // flag a
         state.setFilter(.keepers)          // [b], current = b
         state.requestCommit()
@@ -339,6 +338,48 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.session?.filter, .keepers)
         XCTAssertEqual(state.session?.currentFile.url.lastPathComponent, "b.cr2")
         XCTAssertEqual(state.thumbWindow?.count, 1)
+    }
+
+    /// The rapid "next, Z, repeat" burst must leave the model in a fully
+    /// consistent state: every view derives badges from the same
+    /// `flagged` set, whether it looks up by index (`files[index]`) or by
+    /// the id-keyed cell's file. The strip-badge bug was reported under
+    /// exactly this input pattern; this pins the model invariants the
+    /// views rely on.
+    func testRapidNextToggleBurstLeavesConsistentState() async throws {
+        let files = try (0..<8).map { try TestFixtures.makeRawFile(named: "f\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+
+        for _ in 0..<8 {
+            state.handle(.next)
+            state.handle(.toggleFlag)
+        }
+        // Pair i flags the photo current after pair i's next. The last next
+        // clamps at the end, so pair 8's toggle lands on f7 again and flips
+        // it back OFF: f1...f6 are flagged, f7 is current and unflagged.
+        XCTAssertEqual(state.session?.currentIndex, 7)
+        XCTAssertEqual(state.session?.flaggedCount, 6)
+        XCTAssertFalse(state.session?.isFlagged(state.session!.files[0]) ?? true)
+        XCTAssertFalse(state.session?.isFlagged(state.session!.files[7]) ?? true,
+                       "the clamped pair-8 toggle must flip f7 back off")
+        for i in 1..<7 {
+            XCTAssertTrue(state.session?.isFlagged(state.session!.files[i]) ?? false,
+                          "file \(i) must be flagged after the burst")
+        }
+        // Index-based lookup (main viewer) and id-keyed cell lookup
+        // (filmstrip) must always agree for every displayed file.
+        for (i, file) in (state.session?.files ?? []).enumerated() {
+            XCTAssertEqual(state.session?.isFlagged(file),
+                           state.session?.flagged.contains(file.id),
+                           "lookups disagree at index \(i)")
+        }
+        // The current photo's badge state is the same whichever view reads it.
+        let current = state.session!.currentFile
+        XCTAssertFalse(state.session?.isFlagged(current) ?? true,
+                       "f7 is current and unflagged after the burst")
+        XCTAssertEqual(state.thumbWindow?.count, 8)
     }
 
 }
