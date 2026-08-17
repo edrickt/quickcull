@@ -14,17 +14,20 @@ struct BadgedThumbnailView: View {
     var body: some View {
         Group {
             if let image {
-                Image(decorative: image, scale: 2)
-                    .resizable()
-                    .scaledToFill()
+                Color.black
                     .frame(width: size.width, height: size.height)
-                    .clipped()
-                    .overlay(alignment: .topTrailing) {
-                        if FlagBadgeLogic.shouldShow(isFlagged: isFlagged, hasImage: true) {
-                            FlagBadge(size: badgeSize)
-                                .shadow(color: .black.opacity(0.35), radius: 1.5, y: 0.5)
-                        }
+                    .overlay {
+                        Image(decorative: image, scale: 2)
+                            .resizable()
+                            .scaledToFit()
+                            .overlay(alignment: .topTrailing) {
+                                if FlagBadgeLogic.shouldShow(isFlagged: isFlagged, hasImage: true) {
+                                    FlagBadge(size: badgeSize)
+                                        .shadow(color: .black.opacity(0.35), radius: 1.5, y: 0.5)
+                                }
+                            }
                     }
+                    .clipped()
             } else {
                 Rectangle()
                     .fill(.quaternary)
