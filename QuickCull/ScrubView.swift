@@ -38,11 +38,13 @@ struct ScrubView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
+                    .fontWeight(.light)
                     .help(hudVisible ? "Hide metadata" : "Show metadata")
                     .disabled(appState.isCommitting)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button("New Session") { showNewSessionConfirm = true }
+                    .fontWeight(.light)
                     .disabled(appState.isCommitting)
             }
             ToolbarItem(placement: .primaryAction) {
@@ -52,7 +54,7 @@ struct ScrubView: View {
                 )) {
                     Text("Single").tag(AppState.ViewMode.scrub)
                     Text("Grid").tag(AppState.ViewMode.grid)
-                }.pickerStyle(.segmented).disabled(appState.isCommitting)
+                }.pickerStyle(.segmented).fontWeight(.light).disabled(appState.isCommitting)
             }
             ToolbarItem(placement: .primaryAction) {
                 Picker("Filter", selection: Binding(
@@ -65,6 +67,7 @@ struct ScrubView: View {
                         .tag(CullFilter.keepers)
                 }
                 .pickerStyle(.segmented)
+                .fontWeight(.light)
                 .disabled(appState.isCommitting)
             }
             ToolbarItem(placement: .primaryAction) {
@@ -78,6 +81,7 @@ struct ScrubView: View {
                         Label("Move Flagged to Trash", systemImage: "trash")
                     }
                 }
+                .fontWeight(.light)
                 .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting)
             }
         }
