@@ -37,6 +37,11 @@ struct ScrubView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
+                    .help(hudVisible ? "Hide metadata" : "Show metadata")
+                    .disabled(appState.isCommitting)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button("New Session") { showNewSessionConfirm = true }
                     .disabled(appState.isCommitting)
             }
@@ -74,13 +79,6 @@ struct ScrubView: View {
                     }
                 }
                 .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button { hudVisible.toggle() } label: {
-                    Label(hudVisible ? "Hide Info" : "Show Info", systemImage: hudVisible ? "eye.slash" : "eye")
-                }
-                .help(hudVisible ? "Hide metadata" : "Show metadata")
-                .disabled(appState.isCommitting)
             }
         }
         .alert("Move \(appState.pendingCommitCount) file(s) to Trash?",
