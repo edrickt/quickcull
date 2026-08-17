@@ -128,7 +128,17 @@ public final class AppState {
         case .previous: session.move(by: -1)
         case .jumpForward: session.move(by: 10)
         case .jumpBack: session.move(by: -10)
-        case .toggleFlag: session.toggleFlag()
+        case .toggleFlag:
+            // A flag flip under a non-All filter changes the visible
+            // sequence (the photo drops out / the filter falls back to
+            // All), so the windows must be rebuilt over the new
+            // projection. In All mode the sequence is unchanged and the
+            // windows stay put.
+            if session.toggleFlag() {
+                installWindows(for: session.files)
+            } else {
+                syncWindows()
+            }
         }
         syncWindows()
     }
@@ -137,6 +147,15 @@ public final class AppState {
         guard let session, phase == .scrubbing else { return }
         session.setIndex(index)
         syncWindows()
+    }
+
+    /// Switches the visible sequence to `filter` and rebuilds both image
+    /// windows over the new projection (same path commit uses). No-op
+    /// outside the scrubbing phase.
+    public func setFilter(_ filter: CullFilter) {
+        guard let session, phase == .scrubbing else { return }
+        session.setFilter(filter)
+        installWindows(for: session.files)
     }
 
     private func syncWindows() {

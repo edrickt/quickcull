@@ -285,4 +285,60 @@ final class AppStateTests: XCTestCase {
         XCTAssertNotNil(state.displayImages?.image(at: 0))
     }
 
+    func testSetFilterRebuildsWindowsOverProjection() async throws {
+        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "f\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+
+        state.handle(.toggleFlag)          // flag f0
+        state.setFilter(.flagged)
+        XCTAssertEqual(state.session?.count, 1)
+        XCTAssertEqual(state.thumbWindow?.count, 1)
+        XCTAssertEqual(state.displayImages?.count, 1)
+
+        state.setFilter(.all)
+        XCTAssertEqual(state.session?.count, 3)
+        XCTAssertEqual(state.thumbWindow?.count, 3)
+    }
+
+    func testToggleFlagRebuildsWindowsOnlyWhenProjectionChanges() async throws {
+        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "f\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+
+        let window = state.thumbWindow
+        state.handle(.toggleFlag)          // All mode: sequence unchanged
+        XCTAssertTrue(state.thumbWindow === window,
+                      "flag toggle in All mode must not rebuild windows")
+
+        state.setFilter(.flagged)          // [f0]
+        state.handle(.toggleFlag)          // unflag f0: projection empties -> reset to All
+        XCTAssertEqual(state.session?.filter, .all)
+        XCTAssertEqual(state.session?.count, 3)
+        XCTAssertNotNil(state.thumbWindow)
+    }
+
+    func testCommitUnderKeepersFilterTrashesFlagged() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let trasher = StubTrasher()
+        let state = makeState(trasher: trasher)
+        state.importFiles(urls: [a, b])
+        await waitForScrubbing(state)
+
+        state.handle(.toggleFlag)          // flag a
+        state.setFilter(.keepers)          // [b], current = b
+        state.requestCommit()
+        XCTAssertEqual(state.pendingCommitCount, 1)
+        await state.confirmCommit()
+
+        XCTAssertEqual(trasher.trashed.count, 1)
+        XCTAssertEqual(state.session?.count, 1)
+        XCTAssertEqual(state.session?.filter, .keepers)
+        XCTAssertEqual(state.session?.currentFile.url.lastPathComponent, "b.cr2")
+        XCTAssertEqual(state.thumbWindow?.count, 1)
+    }
+
 }
