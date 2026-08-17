@@ -122,12 +122,14 @@ public final class AppState {
     }
 
     private func installWindows(for files: [SessionFile]) {
-        thumbWindow = ImageWindow.thumbnails(files: files, cache: cache)
-        gridThumbs = ImageWindow.gridThumbnails(files: files, cache: cache)
+        // No sliding window for thumbnails: grid and strip share an all-thumbs window (radius = count).
+        // All thumbnails stay loaded while scrolling, no eviction.
+        let thumbs = ImageWindow.gridThumbnails(files: files, cache: cache)
+        thumbWindow = thumbs
+        gridThumbs = thumbs
         displayImages = ImageWindow.display(files: files, cache: cache)
         syncWindows()
-        // Prime grid window: load all thumbs (window is all, so one sync is enough)
-        gridThumbs?.setCurrent(0)
+        thumbs.setCurrent(0)
     }
 
     /// Dismisses the import-failure banner once the user has seen it.
