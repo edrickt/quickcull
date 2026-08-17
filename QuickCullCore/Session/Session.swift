@@ -71,6 +71,7 @@ public final class Session {
     /// list order takes over, ties resolving forward. A filter matching
     /// nothing (e.g. Flagged while nothing is flagged) falls back to All.
     public func setFilter(_ filter: CullFilter) {
+        guard !files.isEmpty else { return }
         let newFiles = projection(for: filter)
         guard !newFiles.isEmpty else {
             let currentID = currentFile.id
@@ -156,6 +157,7 @@ public final class Session {
     /// files remain (e.g. every flagged photo committed in Flagged mode)
     /// falls back to All, landing on the first file.
     public func remove(_ filesToRemove: [SessionFile]) {
+        guard !files.isEmpty else { return }
         let ids = Set(filesToRemove.map(\.id))
         let original = allFiles
         let currentPos = original.firstIndex(where: { $0.id == currentFile.id }) ?? 0

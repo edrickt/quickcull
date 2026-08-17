@@ -154,6 +154,7 @@ public final class AppState {
     /// outside the scrubbing phase.
     public func setFilter(_ filter: CullFilter) {
         guard let session, phase == .scrubbing else { return }
+        guard session.filter != filter else { return }
         session.setFilter(filter)
         installWindows(for: session.files)
     }
