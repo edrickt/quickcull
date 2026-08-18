@@ -36,15 +36,15 @@ struct ScrubView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button("New Session") { showNewSessionConfirm = true }
+                    .fontWeight(.light)
+                    .disabled(appState.isCommitting)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
                     .fontWeight(.light)
                     .help(hudVisible ? "Hide metadata" : "Show metadata")
-                    .disabled(appState.isCommitting)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button("New Session") { showNewSessionConfirm = true }
-                    .fontWeight(.light)
                     .disabled(appState.isCommitting)
             }
             ToolbarItem(placement: .primaryAction) {
@@ -64,7 +64,7 @@ struct ScrubView: View {
                 )) {
                     Text("All").tag(CullFilter.all)
                     Text("Flagged (\(appState.session?.flaggedCount ?? 0))").tag(CullFilter.flagged)
-                    Text("Keepers (\(appState.session.map { $0.totalCount - $0.flaggedCount } ?? 0))")
+                    Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount } ?? 0))")
                         .tag(CullFilter.keepers)
                 }
                 .pickerStyle(.segmented)

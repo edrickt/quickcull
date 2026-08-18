@@ -32,7 +32,7 @@ struct ImageDisplayView: View {
         ZStack {
             Color.black
             if appState.session?.files.isEmpty == true {
-                // Filter matches nothing (Flagged 0 or Keepers 0) — nothing to load, show empty black instead of spinner
+                // Filter matches nothing (Flagged 0 or Unflagged 0) — nothing to load, show empty black instead of spinner
                 Color.black
             } else if appState.viewMode == .split {
                 HStack(spacing: 8) {
