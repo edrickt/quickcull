@@ -35,16 +35,14 @@ struct ImageDisplayView: View {
                 // Filter matches nothing (Flagged 0 or Keepers 0) — nothing to load, show empty black instead of spinner
                 Color.black
             } else if appState.viewMode == .split {
-                HStack(spacing: 8) { // was spacing:0 with Divider() after HUD
+                HStack(spacing: 8) {
                     if hudVisible, let file = currentFile, let lcg = leftCG {
                         MetadataHUDView(file: file, cgImage: lcg, cache: appState.cache)
                             .frame(width: 240)
                             .background(.ultraThinMaterial)
                             .transition(.move(edge: .leading).combined(with: .opacity))
-                        // Divider() removed — gap via HStack spacing 8 + Color.black background
                     }
-                    HStack(spacing: 8) { // was spacing:0, gap replaces Divider
-                        // Left — current, zoomable, flag target
+                    HStack(spacing: 8) {
                         GeometryReader { geo in
                             ZStack {
                                 Color.black
@@ -54,22 +52,44 @@ struct ImageDisplayView: View {
                                 } else { Color.black }
                             }.frame(width: geo.size.width, height: geo.size.height)
                         }.clipped()
-                        // Right — next preview, zoomable synchronized with left (shared bindings)
                         GeometryReader { geo in
                             ZStack {
                                 Color.black
                                 if let img = rightCG, rightFile != nil {
-                                    // Use leftFile.id as pair id so both recentre together on new pair
                                     ZoomableImageView(cgImage: img, fileID: currentFile?.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
                                 } else if rightFile == nil {
                                     VStack(spacing: 8) { Image(systemName:"photo.slash").font(.title2).foregroundStyle(.secondary)
                                                          Text("No next image").font(.caption).foregroundStyle(.secondary) }
                                 } else {
-                                    // rightFile exists but rightCG not yet loaded (thumb pending)
                                     Color.black
                                 }
                             }.frame(width: geo.size.width, height: geo.size.height)
                         }.clipped()
+                    }
+                    if hudVisible {
+                        if let rFile = rightFile, let rcg = rightCG {
+                            MetadataHUDView(file: rFile, cgImage: rcg, cache: appState.cache)
+                                .frame(width: 240)
+                                .background(.ultraThinMaterial)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        } else if rightFile == nil {
+                            VStack(spacing: 8) {
+                                Image(systemName: "photo.slash").font(.title2).foregroundStyle(.secondary)
+                                Text("No next image").font(.caption).foregroundStyle(.secondary)
+                            }
+                            .frame(width: 240)
+                            .frame(maxHeight: .infinity, alignment: .center)
+                            .background(.ultraThinMaterial)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        } else {
+                            // rightFile exists but rightCG still nil (thumb pending) — show Loading HUD via MetadataHUDView with nil cgImage
+                            if let rFile = rightFile {
+                                MetadataHUDView(file: rFile, cgImage: nil, cache: appState.cache)
+                                    .frame(width: 240)
+                                    .background(.ultraThinMaterial)
+                                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                            }
+                        }
                     }
                 }
                 .overlay(alignment: .topTrailing) { /* no right badge */ }
