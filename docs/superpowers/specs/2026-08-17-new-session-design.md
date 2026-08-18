@@ -79,7 +79,7 @@ ToolbarItem(placement: .primaryAction) {
   Button("Start New Session", role: .destructive) { appState.startNewSession() }
   Button("Cancel", role: .cancel) { }
 } message: {
-  Text("Current session — including flagged photos — will be discarded. The decode cache will be cleared.")
+  Text("This discards the current session, including flagged photos, and clears the decode cache.")
 }
 ```
 
