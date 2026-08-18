@@ -184,12 +184,16 @@ private struct ZoomableImageView: View {
                 installScrollMonitor()
             }
             .onChange(of: fileID) { _, _ in
-                // Persist zoom scale across images; re-center pan for the new photo.
-                // Keep scale/lastScale, reset offset so each new image appears centered
-                // at the same magnification (avoids leftover pan pushing new image out of bounds
-                // when aspect changes). Thumb->display for same fileID does not trigger this.
-                offset = .zero
-                lastOffset = .zero
+                // Persist both zoom and pan across images at same magnification.
+                // Keep scale/lastScale and offset/lastOffset, clamped to new image bounds
+                // to avoid pushing new image out of viewport when aspect changes.
+                // Thumb->display for same fileID does not trigger this.
+                let newFitted = fittedSize(for: cgImage, in: liveContainer)
+                let clamped = clampedOffset(offset, container: liveContainer, fitted: newFitted, scale: scale)
+                if clamped != offset {
+                    offset = clamped
+                    lastOffset = clamped
+                }
             }
         }
     }
