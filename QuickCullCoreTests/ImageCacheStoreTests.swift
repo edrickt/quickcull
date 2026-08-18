@@ -105,4 +105,35 @@ final class ImageCacheStoreTests: XCTestCase {
         let names = try FileManager.default.contentsOfDirectory(atPath: base.path)
         XCTAssertFalse(names.contains { $0.hasSuffix(".tmp") })
     }
+
+    func testStoreAndLoadHistogramRoundTrip() async throws {
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
+        let hist = RawHistogram(bins: [[0, 1, 2], [3, 4, 5], [6, 7, 8]], sensorMax: 16383)
+        try await store.storeHistogram(hist, for: file)
+        let loaded = try await store.loadHistogram(for: file)
+        XCTAssertEqual(loaded, hist)
+    }
+
+    func testLoadHistogramMissingReturnsNil() async throws {
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "b.cr2", in: base))
+        let loaded = try await store.loadHistogram(for: file)
+        XCTAssertNil(loaded)
+    }
+
+    func testLoadHistogramCorruptReturnsNil() async throws {
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "c.cr2", in: base))
+        let url = try await store.histogramURL(for: file)
+        try Data("not json".utf8).write(to: url)
+        let loaded = try await store.loadHistogram(for: file)
+        XCTAssertNil(loaded)
+    }
+
+    func testHistogramURLSharesCacheKey() async throws {
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "d.cr2", in: base))
+        let jpg = try await store.cacheURL(for: file)
+        let hist = try await store.histogramURL(for: file)
+        XCTAssertEqual(hist.deletingPathExtension().deletingPathExtension().lastPathComponent,
+                       jpg.lastPathComponent)
+        XCTAssertTrue(hist.lastPathComponent.hasSuffix(".hist.json"))
+    }
 }

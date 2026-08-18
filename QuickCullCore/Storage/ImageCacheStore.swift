@@ -76,6 +76,39 @@ public actor ImageCacheStore {
         return destination
     }
 
+    /// Sidecar URL for the raw histogram: same cache key, `.hist.json`.
+    public func histogramURL(for file: SessionFile) throws -> URL {
+        try cacheURL(for: file)
+            .appendingPathExtension("hist")
+            .appendingPathExtension("json")
+    }
+
+    /// Store the raw histogram as an atomic JSON sidecar next to the JPEG.
+    public func storeHistogram(_ hist: RawHistogram, for file: SessionFile) throws {
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        let destination = try histogramURL(for: file)
+        let tmp = destination.appendingPathExtension("tmp")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let data = try JSONEncoder().encode(hist)
+        try data.write(to: tmp)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: tmp)
+        } else {
+            try FileManager.default.moveItem(at: tmp, to: destination)
+        }
+    }
+
+    /// Load the raw histogram sidecar; nil when missing or corrupt.
+    public func loadHistogram(for file: SessionFile) throws -> RawHistogram? {
+        let url = try histogramURL(for: file)
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let hist = try? JSONDecoder().decode(RawHistogram.self, from: data) else {
+            return nil
+        }
+        return hist
+    }
+
     public func deleteCachedJPEG(for file: SessionFile) {
         if let url = try? cacheURL(for: file) {
             try? FileManager.default.removeItem(at: url)
