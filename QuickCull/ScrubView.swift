@@ -36,49 +36,54 @@ struct ScrubView: View {
             }
         }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                HStack(spacing: 12) {
-                    Button("New Session") { showNewSessionConfirm = true }
-                        .fontWeight(.light)
-                        .disabled(appState.isCommitting)
-                    Spacer()
-                    Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
-                        .fontWeight(.light)
-                        .help(hudVisible ? "Hide metadata" : "Show metadata")
-                        .disabled(appState.isCommitting)
-                    Picker("View", selection: Binding(
-                        get: { appState.viewMode },
-                        set: { appState.setViewMode($0) }
-                    )) {
-                        Text("Single").tag(AppState.ViewMode.scrub)
-                        Text("Split").tag(AppState.ViewMode.split)
-                        Text("Grid").tag(AppState.ViewMode.grid)
-                    }.pickerStyle(.segmented).fontWeight(.light).disabled(appState.isCommitting)
-                    Picker("Filter", selection: Binding(
-                        get: { appState.session?.filter ?? .all },
-                        set: { appState.setFilter($0) }
-                    )) {
-                        Text("All").tag(CullFilter.all)
-                        Text("Flagged (\(appState.session?.flaggedCount ?? 0))").tag(CullFilter.flagged)
-                        Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount } ?? 0))")
-                            .tag(CullFilter.keepers)
-                    }
-                    .pickerStyle(.segmented)
+            ToolbarItem(placement: .primaryAction) {
+                Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
+                    .fontWeight(.light)
+                    .help(hudVisible ? "Hide metadata" : "Show metadata")
+                    .disabled(appState.isCommitting)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Picker("View", selection: Binding(
+                    get: { appState.viewMode },
+                    set: { appState.setViewMode($0) }
+                )) {
+                    Text("Single").tag(AppState.ViewMode.scrub)
+                    Text("Split").tag(AppState.ViewMode.split)
+                    Text("Grid").tag(AppState.ViewMode.grid)
+                }.pickerStyle(.segmented).fontWeight(.light).disabled(appState.isCommitting)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Picker("Filter", selection: Binding(
+                    get: { appState.session?.filter ?? .all },
+                    set: { appState.setFilter($0) }
+                )) {
+                    Text("All").tag(CullFilter.all)
+                    Text("Flagged (\(appState.session?.flaggedCount ?? 0))").tag(CullFilter.flagged)
+                    Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount } ?? 0))")
+                        .tag(CullFilter.keepers)
+                }
+                .pickerStyle(.segmented)
+                .fontWeight(.light)
+                .disabled(appState.isCommitting)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button("New Session") { showNewSessionConfirm = true }
                     .fontWeight(.light)
                     .disabled(appState.isCommitting)
-                    Button {
-                        appState.requestCommit()
-                        showCommitConfirm = true
-                    } label: {
-                        if appState.isCommitting {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Move Flagged to Trash", systemImage: "trash")
-                        }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    appState.requestCommit()
+                    showCommitConfirm = true
+                } label: {
+                    if appState.isCommitting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Move Flagged to Trash", systemImage: "trash")
                     }
-                    .fontWeight(.light)
-                    .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting)
                 }
+                .fontWeight(.light)
+                .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting)
             }
         }
         .alert("Move \(appState.pendingCommitCount) file(s) to Trash?",
