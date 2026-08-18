@@ -75,21 +75,18 @@ final class LibRawDecoderTests: XCTestCase {
         ]
         for c in cases {
             let bitmap = try decoder.decodeRaw(at: fixture(c.name, c.ext))
-            // fuji_e550 is a super-CCD: raw frame is 45°-rotated relative to the
-            // output (2048x3080 raw → 2894x2177 image), so no rectilinear Bayer
-            // walk exists; the histogram is intentionally nil for these.
-            if c.name == "fuji_e550" {
-                XCTAssertNil(bitmap.histogram, c.name)
-                continue
-            }
-            let hist = try XCTUnwrap(bitmap.histogram, "\(c.name).\(c.ext) should have a raw histogram")
+            let hist = try XCTUnwrap(bitmap.histogram, "\(c.name).\(c.ext) should have a rendered histogram")
             XCTAssertEqual(hist.bins.count, 3, c.name)
             XCTAssertTrue(hist.bins.allSatisfy { $0.count == RawHistogram.binCount }, c.name)
-            XCTAssertGreaterThan(hist.sensorMax, 0, c.name)
-            // per-channel sums: R+G+B covers every Bayer pixel exactly once
-            let total = hist.samples.prefix(3).reduce(0, +)
-            let w = bitmap.width, h = bitmap.height
-            XCTAssertEqual(total, w * h, "\(c.name) histogram must cover every pixel")
+            XCTAssertEqual(hist.sensorMax, 255, c.name)
+            XCTAssertEqual(hist.luminance.count, RawHistogram.binCount, c.name)
+            XCTAssertEqual(hist.samples[0], bitmap.width * bitmap.height, "\(c.name) R count")
+            XCTAssertEqual(hist.samples[1], bitmap.width * bitmap.height, "\(c.name) G count")
+            XCTAssertEqual(hist.samples[2], bitmap.width * bitmap.height, "\(c.name) B count")
+            XCTAssertEqual(hist.samples[3], bitmap.width * bitmap.height, "\(c.name) luma count")
+            XCTAssertEqual(hist.luminance.reduce(0,+), bitmap.width * bitmap.height, "\(c.name) luma sum")
+            // No bin negative, clipping in 0...1
+            XCTAssertTrue(hist.clipping.allSatisfy{ $0 >= 0 && $0 <= 1 }, c.name)
         }
     }
 
@@ -101,11 +98,15 @@ final class LibRawDecoderTests: XCTestCase {
             XCTAssertEqual(hist.luminance.count, RawHistogram.binCount, c.name)
             XCTAssertEqual(hist.luminance.reduce(0,+), bitmap.width * bitmap.height, "\(c.name) luma sum == pixel count")
             XCTAssertEqual(hist.samples[3], bitmap.width * bitmap.height, c.name)
+            XCTAssertEqual(hist.sensorMax, 255, c.name)
         }
     }
 
-    func testLuminanceNilForSuperCCDAndXTrans() throws {
+    func testSuperCCDAndXTransNowHaveHistogram() throws {
         let fuji = try decoder.decodeRaw(at: fixture("fuji_e550","raf"))
-        XCTAssertNil(fuji.histogram, "super-CCD should be nil luminance too")
+        let hist = try XCTUnwrap(fuji.histogram, "super-CCD should now have rendered histogram")
+        XCTAssertEqual(hist.sensorMax, 255)
+        XCTAssertEqual(hist.samples[0], fuji.width * fuji.height)
+        XCTAssertEqual(hist.luminance.count, RawHistogram.binCount)
     }
 }
