@@ -145,33 +145,33 @@ final class DecodeEngineTests: XCTestCase {
         XCTAssertEqual(contents.filter { $0.hasSuffix(".hist.json") }.count, 8)
     }
 
-func testHistogramSidecarWrittenWhenBitmapHasHistogram() async throws {
-    let files = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
-    let hist = RawHistogram(bins: [[0, 1], [2, 3], [4, 5]], sensorMax: 255)
-    let (cache, base) = try await TestFixtures.makeTempCache()
-    defer { try? FileManager.default.removeItem(at: base) }
-    let engine = DecodeEngine(decoder: StubDecoder(histogram: hist), cache: cache)
+    func testHistogramSidecarWrittenWhenBitmapHasHistogram() async throws {
+        let files = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
+        let hist = RawHistogram(bins: [[0, 1], [2, 3], [4, 5]], sensorMax: 255)
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let engine = DecodeEngine(decoder: StubDecoder(histogram: hist), cache: cache)
 
-    _ = await collect(engine.decodeAll(files: files))
-    // 2 JPEGs + 2 sidecars
-    let contents = try FileManager.default.contentsOfDirectory(atPath: base.path)
-    XCTAssertEqual(contents.filter { $0.hasSuffix(".jpg") }.count, 2)
-    XCTAssertEqual(contents.filter { $0.hasSuffix(".hist.json") }.count, 2)
-    for file in files {
-        let loaded = try await cache.loadHistogram(for: file)
-        XCTAssertEqual(loaded, hist)
+        _ = await collect(engine.decodeAll(files: files))
+        // 2 JPEGs + 2 sidecars
+        let contents = try FileManager.default.contentsOfDirectory(atPath: base.path)
+        XCTAssertEqual(contents.filter { $0.hasSuffix(".jpg") }.count, 2)
+        XCTAssertEqual(contents.filter { $0.hasSuffix(".hist.json") }.count, 2)
+        for file in files {
+            let loaded = try await cache.loadHistogram(for: file)
+            XCTAssertEqual(loaded, hist)
+        }
     }
-}
 
-func testNoHistogramSidecarWhenBitmapHasNone() async throws {
-    let files = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
-    let (cache, base) = try await TestFixtures.makeTempCache()
-    defer { try? FileManager.default.removeItem(at: base) }
-    let engine = DecodeEngine(decoder: StubDecoder(), cache: cache)
+    func testNoHistogramSidecarWhenBitmapHasNone() async throws {
+        let files = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let engine = DecodeEngine(decoder: StubDecoder(), cache: cache)
 
-    _ = await collect(engine.decodeAll(files: files))
-    let contents = try FileManager.default.contentsOfDirectory(atPath: base.path)
-    XCTAssertEqual(contents.count, 2)
-    XCTAssertTrue(contents.allSatisfy { $0.hasSuffix(".jpg") })
-}
+        _ = await collect(engine.decodeAll(files: files))
+        let contents = try FileManager.default.contentsOfDirectory(atPath: base.path)
+        XCTAssertEqual(contents.count, 2)
+        XCTAssertTrue(contents.allSatisfy { $0.hasSuffix(".jpg") })
+    }
 }

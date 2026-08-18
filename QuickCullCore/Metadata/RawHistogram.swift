@@ -9,7 +9,7 @@ public struct RawHistogram: Codable, Equatable, Sendable {
     public let bins: [[Int]]
     /// Overall-exposure luminance (Rec. 709 Y), 256 bins.
     public let luminance: [Int]
-    /// Highest possible sensor level (e.g. 16383 for 14-bit).
+    /// 255 for rendered histograms; legacy linear sidecars stored sensor maximum (e.g. 16383).
     public let sensorMax: Int
     /// Total samples per entry (R, G, B, luminance).
     public var samples: [Int] { (bins + [luminance]).map { $0.reduce(0, +) } }
