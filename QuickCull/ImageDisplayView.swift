@@ -37,7 +37,7 @@ struct ImageDisplayView: View {
             } else if appState.viewMode == .split {
                 HStack(spacing: 8) { // was spacing:0 with Divider() after HUD
                     if hudVisible, let file = currentFile, let lcg = leftCG {
-                        MetadataHUDView(file: file, cgImage: lcg)
+                        MetadataHUDView(file: file, cgImage: lcg, cache: appState.cache)
                             .frame(width: 240)
                             .background(.ultraThinMaterial)
                             .transition(.move(edge: .leading).combined(with: .opacity))
@@ -78,7 +78,7 @@ struct ImageDisplayView: View {
             } else if let cgImage = leftCG { // Single (existing)
                 HStack(spacing: 8) { // was spacing:0 with Divider() after HUD — gap via spacing 8 + Color.black
                     if hudVisible, let file = currentFile {
-                        MetadataHUDView(file: file, cgImage: cgImage).frame(width: 240).background(.ultraThinMaterial).transition(.move(edge:.leading).combined(with:.opacity))
+                        MetadataHUDView(file: file, cgImage: cgImage, cache: appState.cache).frame(width: 240).background(.ultraThinMaterial).transition(.move(edge:.leading).combined(with:.opacity))
                         // Divider() removed — gap via HStack spacing 8
                     }
                     GeometryReader { geo in
@@ -323,11 +323,19 @@ private struct ZoomableImageView: View {
 private struct MetadataHUDView: View {
     let file: SessionFile
     let cgImage: CGImage?
+    let cache: ImageCacheStore
     @State private var metadata: ImageMetadata?
+    @State private var histogram: RawHistogram?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
+                if let hist = histogram {
+                    RawHistogramView(histogram: hist)
+                        .frame(height: 72)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 8)
+                }
                 ForEach(rows, id: \.label) { row in
                     VStack(alignment: .leading, spacing: 1) {
                         Text(row.label).font(.caption2).foregroundStyle(.secondary)
@@ -339,14 +347,13 @@ private struct MetadataHUDView: View {
             }
             .padding(10)
         }
-        // Compound task id includes cgImage dimensions so thumb (320px) → full-res upgrade reruns
-        // and updates dimensions; detached utility task runs file I/O off main.
-        // Note: Task.detached is not a child of the outer .task, so cancellation of the outer
-        // task (on rapid scrub) does not automatically cancel the detached work; the outer
-        // .task discards its result when cancelled and only the latest file/dimensions wins.
         .task(id: "\(file.id)-\(cgImage?.width ?? 0)x\(cgImage?.height ?? 0)") {
             metadata = await Task.detached(priority: .utility) {
                 ImageMetadataProvider.metadata(for: file, cgImage: cgImage)
+            }.value
+            // Raw histogram sidecar first; display fallback for non-RAW/missing.
+            histogram = await Task.detached(priority: .utility) {
+                (try? await cache.loadHistogram(for: file)) ?? cgImage.map { DisplayHistogram.compute(from: $0) }
             }.value
         }
     }
@@ -367,6 +374,49 @@ private struct MetadataHUDView: View {
         if let v = m.exposureBias { r.append(("Exposure Bias", v)) }
         if let v = m.whiteBalance { r.append(("White Balance", v)) }
         return r
+    }
+}
+
+/// RGB histogram overlay with log-y scaling and a clipping marker at
+/// sensorMax. 256 bins span the width; channels are additive fills.
+private struct RawHistogramView: View {
+    let histogram: RawHistogram
+
+    var body: some View {
+        Canvas { ctx, size in
+            let binCount = RawHistogram.binCount
+            guard size.width > 0, size.height > 0 else { return }
+            let logMax = histogram.bins
+                .flatMap { $0 }
+                .map { log10(Double($0) + 1) }
+                .max() ?? 1
+            func yFor(_ count: Int) -> Double {
+                size.height * (1 - log10(Double(count) + 1) / logMax)
+            }
+            let binW = size.width / Double(binCount)
+            let colors: [Color] = [.red.opacity(0.55), .green.opacity(0.55), .blue.opacity(0.55)]
+            for channel in 0..<3 {
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: size.height))
+                for bin in 0..<binCount {
+                    let x = Double(bin) * binW
+                    let y = yFor(histogram.bins[channel][bin])
+                    path.addLine(to: CGPoint(x: x, y: y))
+                }
+                path.addLine(to: CGPoint(x: size.width, y: size.height))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(colors[channel]))
+            }
+            if histogram.clipping.contains(where: { $0 > 0.001 }) {
+                var line = Path()
+                line.move(to: CGPoint(x: size.width - 1, y: 0))
+                line.addLine(to: CGPoint(x: size.width - 1, y: size.height))
+                ctx.stroke(line, with: .color(.white), lineWidth: 1)
+            }
+        }
+        .background(.black.opacity(0.3))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityLabel("RAW histogram")
     }
 }
 
