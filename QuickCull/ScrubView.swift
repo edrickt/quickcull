@@ -36,7 +36,7 @@ struct ScrubView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .navigation) {
+            ToolbarItem(placement: .primaryAction) {
                 Button("New Session") { showNewSessionConfirm = true }
                     .fontWeight(.light)
                     .disabled(appState.isCommitting)
