@@ -211,13 +211,18 @@ private struct ZoomableImageView: View {
     private func magnificationGesture(container: CGSize, fitted: CGSize) -> some Gesture {
         MagnificationGesture()
             .onChanged { value in
-                let newScale = lastScale * value
-                let clamped = min(max(newScale, 1), 4)
-                scale = clamped
-                if clamped <= 1.01 {
-                    offset = .zero
-                } else {
-                    offset = clampedOffset(offset, container: container, fitted: fitted, scale: clamped)
+                var tx = Transaction()
+                tx.animation = nil
+                tx.disablesAnimations = true
+                withTransaction(tx) {
+                    let newScale = lastScale * value
+                    let clamped = min(max(newScale, 1), 4)
+                    scale = clamped
+                    if clamped <= 1.01 {
+                        offset = .zero
+                    } else {
+                        offset = clampedOffset(offset, container: container, fitted: fitted, scale: clamped)
+                    }
                 }
             }
             .onEnded { _ in
@@ -230,7 +235,11 @@ private struct ZoomableImageView: View {
                     lastScale = 1
                     lastOffset = .zero
                 } else {
-                    offset = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
+                    let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
+                    if clamped != offset {
+                        var tx = Transaction(); tx.animation = nil; tx.disablesAnimations = true
+                        withTransaction(tx) { offset = clamped }
+                    }
                     lastOffset = offset
                 }
             }
