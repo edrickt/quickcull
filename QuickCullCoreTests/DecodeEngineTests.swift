@@ -141,9 +141,8 @@ final class DecodeEngineTests: XCTestCase {
                       "all fixture files must decode: \(outcomes)")
         let contents = try FileManager.default.contentsOfDirectory(atPath: base.path)
         XCTAssertEqual(contents.filter { $0.hasSuffix(".jpg") }.count, 8)
-        // 7 Bayer fixtures produce a histogram; fuji_e550 (super-CCD, see LibRawDecoderTests)
-        // intentionally returns nil and thus writes no sidecar — 7 hist.json, not 8.
-        XCTAssertEqual(contents.filter { $0.hasSuffix(".hist.json") }.count, 7)
+        // All 8 fixtures now produce a rendered sRGB histogram including fuji_e550 (super-CCD).
+        XCTAssertEqual(contents.filter { $0.hasSuffix(".hist.json") }.count, 8)
     }
 
 func testHistogramSidecarWrittenWhenBitmapHasHistogram() async throws {
