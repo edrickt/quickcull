@@ -82,7 +82,8 @@ public final class LibRawDecoder: RawDecoding {
         let raw = handle.pointee.rawdata
         let sizes = handle.pointee.sizes
         let filters = handle.pointee.idata.filters
-        guard let ptr = raw.raw_image else { return nil }
+        guard let ptr = raw.raw_image, sizes.raw_width > 0, sizes.raw_height > 0 else { return nil }
+        guard filters != 9 && filters != 1 else { return nil } // 9=X-Trans 6x6, 1=16x16 non-Bayer
         let rawW = Int(sizes.raw_width), rawH = Int(sizes.raw_height)
         let left = Int(sizes.left_margin), top = Int(sizes.top_margin)
         // Visible region: exactly the raw pixels dcraw_process demosaics into
