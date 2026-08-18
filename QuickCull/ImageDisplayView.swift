@@ -237,14 +237,19 @@ private struct ZoomableImageView: View {
     }
 
     private func dragGesture(container: CGSize, fitted: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 4, coordinateSpace: .local)
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { val in
                 guard scale > 1.01 else { return }
-                let new = CGSize(
-                    width: lastOffset.width + val.translation.width,
-                    height: lastOffset.height + val.translation.height
-                )
-                offset = clampedOffset(new, container: container, fitted: fitted, scale: scale)
+                var tx = Transaction()
+                tx.animation = nil
+                tx.disablesAnimations = true
+                withTransaction(tx) {
+                    let new = CGSize(
+                        width: lastOffset.width + val.translation.width,
+                        height: lastOffset.height + val.translation.height
+                    )
+                    offset = clampedOffset(new, container: container, fitted: fitted, scale: scale)
+                }
             }
             .onEnded { _ in
                 lastOffset = offset
