@@ -9,12 +9,16 @@ public struct RawBitmap {
     /// LibRaw flip value (0-7). Informational only: the pixel buffer is
     /// already upright (dcraw_process applied the flip).
     public let flip: Int
+    /// Linear sensor histogram from the raw data (nil for non-RAW or
+    /// formats without a Bayer raw_image, e.g. X3F).
+    public let histogram: RawHistogram?
 
-    public init(image: CGImage, width: Int, height: Int, flip: Int) {
+    public init(image: CGImage, width: Int, height: Int, flip: Int, histogram: RawHistogram? = nil) {
         self.image = image
         self.width = width
         self.height = height
         self.flip = flip
+        self.histogram = histogram
     }
 }
 

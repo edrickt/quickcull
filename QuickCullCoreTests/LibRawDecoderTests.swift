@@ -67,4 +67,29 @@ final class LibRawDecoderTests: XCTestCase {
         XCTAssertEqual(thumb.width, 1926)
         XCTAssertEqual(thumb.height, 2576)
     }
+
+    func testHistogramComputedForRawFixtures() throws {
+        let cases: [(name: String, ext: String)] = [
+            ("img_0062", "cr2"), ("mg_2233", "cr3"), ("dsc8140", "nef"), ("dsc0258", "arw"),
+            ("fuji_e550", "raf"), ("olympus_c5050z", "orf"), ("p1000336", "rw2"), ("pentax_k01", "dng"),
+        ]
+        for c in cases {
+            let bitmap = try decoder.decodeRaw(at: fixture(c.name, c.ext))
+            // fuji_e550 is a super-CCD: raw frame is 45°-rotated relative to the
+            // output (2048x3080 raw → 2894x2177 image), so no rectilinear Bayer
+            // walk exists; the histogram is intentionally nil for these.
+            if c.name == "fuji_e550" {
+                XCTAssertNil(bitmap.histogram, c.name)
+                continue
+            }
+            let hist = try XCTUnwrap(bitmap.histogram, "\(c.name).\(c.ext) should have a raw histogram")
+            XCTAssertEqual(hist.bins.count, 3, c.name)
+            XCTAssertTrue(hist.bins.allSatisfy { $0.count == RawHistogram.binCount }, c.name)
+            XCTAssertGreaterThan(hist.sensorMax, 0, c.name)
+            // per-channel sums: R+G+B covers every Bayer pixel exactly once
+            let total = hist.samples.reduce(0, +)
+            let w = bitmap.width, h = bitmap.height
+            XCTAssertEqual(total, w * h, "\(c.name) histogram must cover every pixel")
+        }
+    }
 }

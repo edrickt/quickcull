@@ -23,6 +23,8 @@ public final class LibRawDecoder: RawDecoding {
             throw DecodeError.cannotUnpack(errorString(ret))
         }
 
+        let histogram = Self.rawHistogram(from: handle)
+
         handle.pointee.params.output_bps = 8
         handle.pointee.params.use_camera_wb = 1
         handle.pointee.params.output_color = 1 // sRGB
@@ -72,7 +74,39 @@ public final class LibRawDecoder: RawDecoding {
         return RawBitmap(image: image,
                          width: Int(p.width),
                          height: Int(p.height),
-                         flip: Int(handle.pointee.sizes.flip))
+                         flip: Int(handle.pointee.sizes.flip),
+                         histogram: histogram)
+    }
+
+    private static func rawHistogram(from handle: UnsafeMutablePointer<libraw_data_t>) -> RawHistogram? {
+        let raw = handle.pointee.rawdata
+        let sizes = handle.pointee.sizes
+        let filters = handle.pointee.idata.filters
+        guard let ptr = raw.raw_image else { return nil }
+        let rawW = Int(sizes.raw_width), rawH = Int(sizes.raw_height)
+        let left = Int(sizes.left_margin), top = Int(sizes.top_margin)
+        // Visible region: exactly the raw pixels dcraw_process demosaics into
+        // the output bitmap (margins and edge crops stripped). When the region
+        // extends beyond the raw buffer the sensor is laid out non-rectilinearly
+        // (e.g. Fuji super-CCD 45° rotation) — no Bayer column walk applies.
+        let w = Int(sizes.iwidth), h = Int(sizes.iheight)
+        guard rawW > 0, rawH > 0, w > 0, h > 0,
+              left + w <= rawW, top + h <= rawH else { return nil }
+        let maxLevel = Int(handle.pointee.color.maximum != 0 ? handle.pointee.color.maximum : 16383)
+        var counts = [[Int]](repeating: [Int](repeating: 0, count: RawHistogram.binCount), count: 3)
+        for row in 0..<h {
+            let rowOffset = (row + top) * rawW
+            for col in 0..<w {
+                // dcraw fcol: Bayer color at (row,col)
+                let c = Int((filters >> (((row & 1) << 1 | (col & 1)) << 1)) & 3)
+                // 0=R, 1=G, 2=B, 3=G2 → merge G2 into green (index 1)
+                let channel = c == 3 ? 1 : c
+                let v = Int(ptr[rowOffset + col + left])
+                let bin = min(RawHistogram.binCount - 1, max(0, (v * (RawHistogram.binCount - 1)) / maxLevel))
+                counts[channel][bin] += 1
+            }
+        }
+        return RawHistogram(bins: counts, sensorMax: maxLevel)
     }
 
     private func errorString(_ code: Int32) -> String {
