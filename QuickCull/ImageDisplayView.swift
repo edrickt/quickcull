@@ -113,6 +113,8 @@ private struct ZoomableImageView: View {
 
     @State private var globalFrame: CGRect = .zero
     @State private var scrollMonitor: Any?
+    @State private var liveContainer: CGSize = .zero
+    @State private var liveFitted: CGSize = .zero
 
     var body: some View {
         GeometryReader { geo in
@@ -142,19 +144,24 @@ private struct ZoomableImageView: View {
                         .onChange(of: proxy.frame(in: .global)) { _, newFrame in globalFrame = newFrame }
                 }
             )
-            .onAppear { installScrollMonitor(container: container, fitted: fitted) }
-            .onDisappear { removeScrollMonitor() }
-            .onChange(of: container.width) { _, _ in
-                guard scale > 1.01 else { return }
-                let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
-                if clamped != offset { offset = clamped; lastOffset = clamped }
-                installScrollMonitor(container: container, fitted: fitted)
+            .onAppear {
+                liveContainer = container
+                liveFitted = fitted
+                installScrollMonitor()
             }
-            .onChange(of: container.height) { _, _ in
-                guard scale > 1.01 else { return }
-                let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
-                if clamped != offset { offset = clamped; lastOffset = clamped }
-                installScrollMonitor(container: container, fitted: fitted)
+            .onDisappear { removeScrollMonitor() }
+            .onChange(of: container) { _, newValue in
+                liveContainer = newValue
+                liveFitted = fittedSize(for: cgImage, in: newValue)
+                if scale > 1.01 {
+                    let clamped = clampedOffset(offset, container: newValue, fitted: liveFitted, scale: scale)
+                    if clamped != offset { offset = clamped; lastOffset = clamped }
+                }
+                installScrollMonitor()
+            }
+            .onChange(of: fitted) { _, newFitted in
+                liveFitted = newFitted
+                installScrollMonitor()
             }
             .onChange(of: fileID) { _, _ in
                 // Persist zoom scale across images; re-center pan for the new photo.
@@ -167,28 +174,31 @@ private struct ZoomableImageView: View {
         }
     }
 
-    private func installScrollMonitor(container: CGSize, fitted: CGSize) {
+    private func installScrollMonitor() {
         removeScrollMonitor()
 #if canImport(AppKit)
         let offsetBinding = $offset
         let lastOffsetBinding = $lastOffset
         let scaleBinding = $scale
         let frameBinding = $globalFrame
-        let containerSnap = container
-        let fittedSnap = fitted
+        let containerBinding = $liveContainer
+        let fittedBinding = $liveFitted
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
             let currentScale = scaleBinding.wrappedValue
             guard currentScale > 1.01 else { return event }
-            // Only handle event over this pane — prevents Split double-apply
+            // Only handle event over this pane — prevents Split double-apply.
+            // If globalFrame is still .zero (pre-layout), allow handling so initial
+            // two-finger pan isn't blocked until the first layout pass / click-drag.
+            let gf = frameBinding.wrappedValue
             let mouse = NSEvent.mouseLocation
-            guard frameBinding.wrappedValue.contains(mouse) else { return event }
+            if !gf.isEmpty && !gf.contains(mouse) { return event }
             let dx: CGFloat = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : CGFloat(event.deltaX) * 10
             let dy: CGFloat = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : CGFloat(event.deltaY) * 10
             if abs(dx) < 0.02 && abs(dy) < 0.02 { return event }
             let currentOffset = offsetBinding.wrappedValue
             // Inverted on both axes (e254e00): +dx/+dy
             let new = CGSize(width: currentOffset.width + dx, height: currentOffset.height + dy)
-            let clamped = clampedOffset(new, container: containerSnap, fitted: fittedSnap, scale: currentScale)
+            let clamped = clampedOffset(new, container: containerBinding.wrappedValue, fitted: fittedBinding.wrappedValue, scale: currentScale)
             // Synchronous — no DispatchQueue.main.async
             offsetBinding.wrappedValue = clamped
             lastOffsetBinding.wrappedValue = clamped
