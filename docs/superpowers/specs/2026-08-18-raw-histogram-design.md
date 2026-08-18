@@ -85,7 +85,7 @@ private static func rawHistogram(from handle: UnsafeMutablePointer<libraw_data_t
             // Bayer color at (row,col): dcraw fcol convention
             let c = Int((filters >> (((row & 1) << 1 | (col & 1)) << 1)) & 3)
             // merge G1/G2 into green (index 1); red=0, blue=2
-            let channel = c == 3 ? 2 : (c == 1 ? 1 : 0) // 0=R,1=G,2=B,3=G2
+            let channel = c == 3 ? 1 : c
             let v = Int(ptr[row * w + col])
             let bin = min(RawHistogram.binCount - 1, max(0, (v * (RawHistogram.binCount - 1)) / maxLevel))
             counts[channel][bin] += 1
@@ -128,17 +128,16 @@ if let hist = histogram {
     metadata = await Task.detached(priority: .utility) {
         ImageMetadataProvider.metadata(for: file, cgImage: cgImage)
     }.value
-    // Histogram: raw sidecar first, display fallback for non-RAW
+    // Histogram: raw sidecar first, display fallback for non-RAW / missing
     if let hist = await Task.detached(priority: .utility) {
-        ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()).loadHistogram(for: file)
-            ?? { DisplayHistogram.compute(from: cgImage) }()
+        cache.loadHistogram(for: file) ?? (cgImage.map { DisplayHistogram.compute(from: $0) })
     }.value {
         histogram = hist
     }
 }
 ```
 
-Wait — `ImageCacheStore` is an actor; the HUD needs the app's cache instance. Better: pass `cache: ImageCacheStore` (or a `histogramProvider` closure) into `MetadataHUDView` from `ImageDisplayView`, which reads `appState.cache` (already available via `@Environment(AppState.self)`). `ImageDisplayView` passes `appState.cache` into `MetadataHUDView(file:cgImage:cache:)`. Both call sites (Single and Split HUD) pass it.
+`ImageCacheStore` is an actor and the HUD needs the app's instance (correct baseURL): `ImageDisplayView` reads `appState.cache` (`@Environment(AppState.self)`) and passes it into `MetadataHUDView(file:cgImage:cache:)` at both call sites (Single and Split HUD). The `.task` uses that cache for `loadHistogram`.
 
 - `RawHistogramView` (new private struct in same file, or `QuickCull/RawHistogramView.swift`):
 
