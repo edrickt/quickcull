@@ -122,13 +122,13 @@ struct ScrubView: View {
         }
         .onChange(of: appState.viewMode) { oldMode, newMode in
             // Grid round-trip must not restore zoom: zoom persists only while staying in single.
-            // Reset on any toggle so Single→Grid→Single lands at fit.
+            // Reset zoom on any toggle so Single→Grid→Single lands at fit.
+            // hudVisible is preserved across viewMode changes (user expects metadata to stay visible).
             if oldMode != newMode {
                 zoomScale = 1
                 zoomLastScale = 1
                 zoomOffset = .zero
                 zoomLastOffset = .zero
-                hudVisible = false
             }
         }
     }
