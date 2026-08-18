@@ -144,7 +144,6 @@ private struct ZoomableImageView: View {
             )
             .onAppear { installScrollMonitor(container: container, fitted: fitted) }
             .onDisappear { removeScrollMonitor() }
-            .onChange(of: scale) { _, _ in installScrollMonitor(container: container, fitted: fitted) }
             .onChange(of: container.width) { _, _ in
                 guard scale > 1.01 else { return }
                 let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
@@ -171,31 +170,29 @@ private struct ZoomableImageView: View {
     private func installScrollMonitor(container: CGSize, fitted: CGSize) {
         removeScrollMonitor()
 #if canImport(AppKit)
-        // Capture bindings so event-time reads see current zoom/pan values, not install-time snapshot.
         let offsetBinding = $offset
         let lastOffsetBinding = $lastOffset
         let scaleBinding = $scale
         let frameBinding = $globalFrame
-        // Capture container/fitted as values at install time (reinstalled on resize/scale change).
         let containerSnap = container
         let fittedSnap = fitted
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
             let currentScale = scaleBinding.wrappedValue
             guard currentScale > 1.01 else { return event }
-            guard event.hasPreciseScrollingDeltas else { return event }
+            // Only handle event over this pane — prevents Split double-apply
             let mouse = NSEvent.mouseLocation
             guard frameBinding.wrappedValue.contains(mouse) else { return event }
-            let delta = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
-            if abs(delta.width) < 0.1 && abs(delta.height) < 0.1 { return event }
+            let dx: CGFloat = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : CGFloat(event.deltaX) * 10
+            let dy: CGFloat = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : CGFloat(event.deltaY) * 10
+            if abs(dx) < 0.02 && abs(dy) < 0.02 { return event }
             let currentOffset = offsetBinding.wrappedValue
-            let new = CGSize(width: currentOffset.width - delta.width, height: currentOffset.height - delta.height)
+            // Inverted on both axes (e254e00): +dx/+dy
+            let new = CGSize(width: currentOffset.width + dx, height: currentOffset.height + dy)
             let clamped = clampedOffset(new, container: containerSnap, fitted: fittedSnap, scale: currentScale)
-            // Mutate on main
-            DispatchQueue.main.async {
-                offsetBinding.wrappedValue = clamped
-                lastOffsetBinding.wrappedValue = clamped
-            }
-            return nil
+            // Synchronous — no DispatchQueue.main.async
+            offsetBinding.wrappedValue = clamped
+            lastOffsetBinding.wrappedValue = clamped
+            return nil // consume while zoomed
         }
 #endif
     }
