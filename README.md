@@ -48,7 +48,7 @@ instance first). `./stop.sh` quits the app.
 
 ## Cache
 
-Decoded photos are stored as full-resolution q75 JPEGs in
+Decoded photos are full-resolution q75 JPEGs in
 `~/Library/Application Support/QuickCull/cache`, keyed by file path. The cache
 is wiped on launch (and best-effort on quit), so every session decodes from
 the originals.

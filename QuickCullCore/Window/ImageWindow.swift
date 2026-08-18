@@ -101,7 +101,7 @@ public final class ImageWindow {
     }
 
     /// LRU viewport bounding: keep only window + most recently ensured viewport (~40).
-    /// Ensures memory stays bounded to viewport (~20-40) + scrub window 61 even for 500+ files.
+    /// Keeps memory bounded to viewport (~20-40) + scrub window 61 even for 500+ files.
     private func pruneEnsuredIndices(windowSet: Set<Int>, recent: [Int]) {
         let maxViewport = 40
         let cap = windowSet.count + maxViewport
