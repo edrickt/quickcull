@@ -36,13 +36,10 @@ struct ScrubView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .navigation) {
                 Button("New Session") { showNewSessionConfirm = true }
                     .fontWeight(.light)
                     .disabled(appState.isCommitting)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Color.clear.frame(width: 16, height: 1).accessibilityHidden(true)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
