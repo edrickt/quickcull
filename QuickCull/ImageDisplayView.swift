@@ -331,10 +331,14 @@ private struct MetadataHUDView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 if let hist = histogram {
-                    RawHistogramView(histogram: hist)
-                        .frame(height: 72)
-                        .padding(.horizontal, 10)
-                        .padding(.top, 8)
+                    VStack(spacing: 8) {
+                        RawHistogramView(histogram: hist)
+                            .frame(height: 72)
+                        RawLuminanceHistogramView(histogram: hist)
+                            .frame(height: 72)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
                 }
                 ForEach(rows, id: \.label) { row in
                     VStack(alignment: .leading, spacing: 1) {
@@ -425,6 +429,40 @@ private struct RawHistogramView: View {
         .background(.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .accessibilityLabel("RAW histogram")
+    }
+}
+
+/// Single-channel overall-exposure histogram, same log-y and clipping marker as RGB.
+private struct RawLuminanceHistogramView: View {
+    let histogram: RawHistogram
+    var body: some View {
+        Canvas { ctx, size in
+            let binCount = RawHistogram.binCount
+            guard size.width > 0, size.height > 0 else { return }
+            let rawMax = histogram.luminance.map { log10(Double($0) + 1) }.max() ?? 0
+            let logMax = rawMax > 0 ? rawMax : 1
+            func yFor(_ count: Int) -> Double { size.height * (1 - log10(Double(count) + 1) / logMax) }
+            let binW = size.width / Double(binCount)
+            var path = Path()
+            path.move(to: CGPoint(x: 0, y: size.height))
+            for bin in 0..<binCount {
+                let x = Double(bin) * binW
+                let y = yFor(histogram.luminance[bin])
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+            path.addLine(to: CGPoint(x: size.width, y: size.height))
+            path.closeSubpath()
+            ctx.fill(path, with: .color(.white.opacity(0.85)))
+            if histogram.clipping.count > 3 && histogram.clipping[3] > 0.001 {
+                var line = Path()
+                line.move(to: CGPoint(x: size.width - 1, y: 0))
+                line.addLine(to: CGPoint(x: size.width - 1, y: size.height))
+                ctx.stroke(line, with: .color(.white), lineWidth: 1)
+            }
+        }
+        .background(.black.opacity(0.3))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityLabel("Luminance histogram")
     }
 }
 
