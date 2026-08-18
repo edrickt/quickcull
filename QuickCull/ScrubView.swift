@@ -42,6 +42,9 @@ struct ScrubView: View {
                     .disabled(appState.isCommitting)
             }
             ToolbarItem(placement: .primaryAction) {
+                Color.clear.frame(width: 16, height: 1).accessibilityHidden(true)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
                     .fontWeight(.light)
                     .help(hudVisible ? "Hide metadata" : "Show metadata")
