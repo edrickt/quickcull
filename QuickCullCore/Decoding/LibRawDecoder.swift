@@ -95,6 +95,7 @@ public final class LibRawDecoder: RawDecoding {
               left + w <= rawW, top + h <= rawH else { return nil }
         let maxLevel = Int(handle.pointee.color.maximum != 0 ? handle.pointee.color.maximum : 16383)
         var counts = [[Int]](repeating: [Int](repeating: 0, count: RawHistogram.binCount), count: 3)
+        var luma = [Int](repeating: 0, count: RawHistogram.binCount)
         for row in 0..<h {
             let rowOffset = (row + top) * rawW
             for col in 0..<w {
@@ -105,9 +106,10 @@ public final class LibRawDecoder: RawDecoding {
                 let v = Int(ptr[rowOffset + col + left])
                 let bin = min(RawHistogram.binCount - 1, max(0, (v * (RawHistogram.binCount - 1)) / maxLevel))
                 counts[channel][bin] += 1
+                luma[bin] += 1
             }
         }
-        return RawHistogram(bins: counts, sensorMax: maxLevel)
+        return RawHistogram(bins: counts, luminance: luma, sensorMax: maxLevel)
     }
 
     private func errorString(_ code: Int32) -> String {

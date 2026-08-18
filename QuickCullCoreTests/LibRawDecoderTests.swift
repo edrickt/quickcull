@@ -87,9 +87,25 @@ final class LibRawDecoderTests: XCTestCase {
             XCTAssertTrue(hist.bins.allSatisfy { $0.count == RawHistogram.binCount }, c.name)
             XCTAssertGreaterThan(hist.sensorMax, 0, c.name)
             // per-channel sums: R+G+B covers every Bayer pixel exactly once
-            let total = hist.samples.reduce(0, +)
+            let total = hist.samples.prefix(3).reduce(0, +)
             let w = bitmap.width, h = bitmap.height
             XCTAssertEqual(total, w * h, "\(c.name) histogram must cover every pixel")
         }
+    }
+
+    func testLuminanceComputedForBayerFixtures() throws {
+        let cases: [(name: String, ext: String)] = [("img_0062","cr2"),("dsc8140","nef"),("p1000336","rw2")]
+        for c in cases {
+            let bitmap = try decoder.decodeRaw(at: fixture(c.name, c.ext))
+            let hist = try XCTUnwrap(bitmap.histogram, "\(c.name)")
+            XCTAssertEqual(hist.luminance.count, RawHistogram.binCount, c.name)
+            XCTAssertEqual(hist.luminance.reduce(0,+), bitmap.width * bitmap.height, "\(c.name) luma sum == pixel count")
+            XCTAssertEqual(hist.samples[3], bitmap.width * bitmap.height, c.name)
+        }
+    }
+
+    func testLuminanceNilForSuperCCDAndXTrans() throws {
+        let fuji = try decoder.decodeRaw(at: fixture("fuji_e550","raf"))
+        XCTAssertNil(fuji.histogram, "super-CCD should be nil luminance too")
     }
 }
