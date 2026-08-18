@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-/// Raw linear histogram (8-bit post-demosaic, no WB, no color matrix, linear gamma) plus
-/// weighted luminance (Rec.709 Y). sensorMax is 255.
+/// Rendered sRGB histogram (8-bit post-demosaic, post-WB, post-gamma) plus
+/// weighted luminance (Rec.709 Y). sensorMax is 255 for rendered histograms.
 public struct RawHistogram: Codable, Equatable, Sendable {
     public static let binCount = 256
     /// Per-channel counts: [red, green, blue], 256 bins each.

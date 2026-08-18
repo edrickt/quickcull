@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// LibRaw-backed decoder: full-resolution demosaic via the C API, no WB/gamma/matrix.
+/// LibRaw-backed decoder: full-resolution demosaic via the C API.
 /// Stateless and thread-safe: every call creates its own libraw handle.
 public final class LibRawDecoder: RawDecoding {
 
@@ -24,15 +24,12 @@ public final class LibRawDecoder: RawDecoding {
         }
 
         handle.pointee.params.output_bps = 8
-        handle.pointee.params.use_camera_wb = 0
-        handle.pointee.params.use_auto_wb = 0
-        handle.pointee.params.output_color = 0 // raw, no sRGB matrix
-        handle.pointee.params.no_auto_bright = 1
-        handle.pointee.params.highlight = 0
+        handle.pointee.params.use_camera_wb = 1
+        handle.pointee.params.output_color = 1 // sRGB
         withUnsafeMutablePointer(to: &handle.pointee.params.gamm) { gPtr in
             gPtr.withMemoryRebound(to: Double.self, capacity: 6) { buf in
-                buf[0] = 1.0
-                buf[1] = 1.0
+                buf[0] = 1.0 / 2.222
+                buf[1] = 4.5
             }
         }
         ret = libraw_dcraw_process(handle)
