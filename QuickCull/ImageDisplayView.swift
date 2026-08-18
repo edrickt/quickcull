@@ -352,10 +352,45 @@ private struct MetadataHUDView: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let hist = histogram {
                     VStack(spacing: 8) {
-                        RawHistogramView(histogram: hist)
-                            .frame(height: 72)
-                        RawLuminanceHistogramView(histogram: hist)
-                            .frame(height: 72)
+                        VStack(spacing: 2) {
+                            let rClip = String(format: "%.1f%%", hist.clipping[0] * 100)
+                            let gClip = String(format: "%.1f%%", hist.clipping[1] * 100)
+                            let bClip = String(format: "%.1f%%", hist.clipping[2] * 100)
+                            let totalR = hist.samples[0], totalG = hist.samples[1], totalB = hist.samples[2]
+                            let meanR: Double = totalR > 0 ? Double(hist.bins[0].enumerated().map{ $0.element * $0.offset }.reduce(0,+)) / Double(totalR) : 0
+                            let meanG: Double = totalG > 0 ? Double(hist.bins[1].enumerated().map{ $0.element * $0.offset }.reduce(0,+)) / Double(totalG) : 0
+                            let meanB: Double = totalB > 0 ? Double(hist.bins[2].enumerated().map{ $0.element * $0.offset }.reduce(0,+)) / Double(totalB) : 0
+                            let mean = Int((meanR + meanG + meanB) / 3 + 0.5)
+                            HStack {
+                                Text("R:\(rClip) G:\(gClip) B:\(bClip)")
+                                Spacer()
+                                Text("Mean \(mean)")
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 2)
+                            RawHistogramView(histogram: hist)
+                                .frame(height: 72)
+                        }
+                        VStack(spacing: 2) {
+                            let lClip = String(format: "%.1f%%", hist.clipping.count > 3 ? hist.clipping[3]*100 : 0)
+                            let totalL = hist.samples.count > 3 ? hist.samples[3] : hist.luminance.reduce(0,+)
+                            let meanL: Int = {
+                                guard totalL > 0 else { return 0 }
+                                let sum = hist.luminance.enumerated().map{ $0.element * $0.offset }.reduce(0,+)
+                                return Int(Double(sum)/Double(totalL) + 0.5)
+                            }()
+                            HStack {
+                                Text("Luma \(lClip)")
+                                Spacer()
+                                Text("Mean \(meanL)")
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 2)
+                            RawLuminanceHistogramView(histogram: hist)
+                                .frame(height: 72)
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
@@ -412,32 +447,31 @@ private struct MetadataHUDView: View {
 /// sensorMax. 256 bins span the width; channels are additive fills.
 private struct RawHistogramView: View {
     let histogram: RawHistogram
-
     var body: some View {
         Canvas { ctx, size in
             let binCount = RawHistogram.binCount
             guard size.width > 0, size.height > 0 else { return }
-            let rawMax = histogram.bins
-                .flatMap { $0 }
-                .map { log10(Double($0) + 1) }
-                .max() ?? 0
+            let rawMax = histogram.bins.flatMap{ $0 }.map{ log10(Double($0)+1) }.max() ?? 0
             let logMax = rawMax > 0 ? rawMax : 1
-            func yFor(_ count: Int) -> Double {
-                size.height * (1 - log10(Double(count) + 1) / logMax)
-            }
+            func yFor(_ count: Int) -> Double { size.height * (1 - log10(Double(count)+1)/logMax) }
             let binW = size.width / Double(binCount)
-            let colors: [Color] = [.red.opacity(0.55), .green.opacity(0.55), .blue.opacity(0.55)]
+            // faint axes/baseline
+            var axes = Path()
+            axes.move(to: CGPoint(x: 0, y: size.height))
+            axes.addLine(to: CGPoint(x: size.width, y: size.height))
+            axes.move(to: CGPoint(x: 0, y: 0))
+            axes.addLine(to: CGPoint(x: 0, y: size.height))
+            ctx.stroke(axes, with: .color(.white.opacity(0.15)), lineWidth: 0.5)
+            let colors: [Color] = [.red.opacity(0.9), .green.opacity(0.9), .blue.opacity(0.9)]
             for channel in 0..<3 {
                 var path = Path()
-                path.move(to: CGPoint(x: 0, y: size.height))
-                for bin in 0..<binCount {
+                path.move(to: CGPoint(x: 0, y: yFor(histogram.bins[channel][0])))
+                for bin in 1..<binCount {
                     let x = Double(bin) * binW
                     let y = yFor(histogram.bins[channel][bin])
                     path.addLine(to: CGPoint(x: x, y: y))
                 }
-                path.addLine(to: CGPoint(x: size.width, y: size.height))
-                path.closeSubpath()
-                ctx.fill(path, with: .color(colors[channel]))
+                ctx.stroke(path, with: .color(colors[channel]), lineWidth: 1.5)
             }
             if histogram.clipping.prefix(3).contains(where: { $0 > 0.001 }) {
                 var line = Path()
@@ -459,20 +493,24 @@ private struct RawLuminanceHistogramView: View {
         Canvas { ctx, size in
             let binCount = RawHistogram.binCount
             guard size.width > 0, size.height > 0 else { return }
-            let rawMax = histogram.luminance.map { log10(Double($0) + 1) }.max() ?? 0
+            let rawMax = histogram.luminance.map{ log10(Double($0)+1) }.max() ?? 0
             let logMax = rawMax > 0 ? rawMax : 1
-            func yFor(_ count: Int) -> Double { size.height * (1 - log10(Double(count) + 1) / logMax) }
+            func yFor(_ count: Int) -> Double { size.height * (1 - log10(Double(count)+1)/logMax) }
             let binW = size.width / Double(binCount)
+            var axes = Path()
+            axes.move(to: CGPoint(x: 0, y: size.height))
+            axes.addLine(to: CGPoint(x: size.width, y: size.height))
+            axes.move(to: CGPoint(x: 0, y: 0))
+            axes.addLine(to: CGPoint(x: 0, y: size.height))
+            ctx.stroke(axes, with: .color(.white.opacity(0.15)), lineWidth: 0.5)
             var path = Path()
-            path.move(to: CGPoint(x: 0, y: size.height))
-            for bin in 0..<binCount {
+            path.move(to: CGPoint(x: 0, y: yFor(histogram.luminance[0])))
+            for bin in 1..<binCount {
                 let x = Double(bin) * binW
                 let y = yFor(histogram.luminance[bin])
                 path.addLine(to: CGPoint(x: x, y: y))
             }
-            path.addLine(to: CGPoint(x: size.width, y: size.height))
-            path.closeSubpath()
-            ctx.fill(path, with: .color(.white.opacity(0.85)))
+            ctx.stroke(path, with: .color(.white.opacity(0.9)), lineWidth: 1.5)
             if histogram.clipping.count > 3 && histogram.clipping[3] > 0.001 {
                 var line = Path()
                 line.move(to: CGPoint(x: size.width - 1, y: 0))
