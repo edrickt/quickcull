@@ -24,6 +24,14 @@ public final class LibRawDecoder: RawDecoding {
         }
 
         handle.pointee.params.output_bps = 8
+        handle.pointee.params.use_camera_wb = 1
+        handle.pointee.params.output_color = 1 // sRGB
+        withUnsafeMutablePointer(to: &handle.pointee.params.gamm) { gPtr in
+            gPtr.withMemoryRebound(to: Double.self, capacity: 6) { buf in
+                buf[0] = 1.0 / 2.222
+                buf[1] = 4.5
+            }
+        }
         ret = libraw_dcraw_process(handle)
         guard ret == LIBRAW_SUCCESS.rawValue else {
             throw DecodeError.cannotProcess(errorString(ret))
