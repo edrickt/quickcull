@@ -9,9 +9,11 @@ final class StubDecoder: RawDecoding, @unchecked Sendable {
     private let lock = NSLock()
     private var calls: [String] = []
     let failIDs: Set<String>
+    let histogram: RawHistogram?
 
-    init(failIDs: Set<String> = []) {
+    init(failIDs: Set<String> = [], histogram: RawHistogram? = nil) {
         self.failIDs = failIDs
+        self.histogram = histogram
     }
 
     func decodeRaw(at url: URL) throws -> RawBitmap {
@@ -31,7 +33,8 @@ final class StubDecoder: RawDecoding, @unchecked Sendable {
                             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
                             provider: provider, decode: nil, shouldInterpolate: false,
                             intent: .defaultIntent)!
-        return RawBitmap(image: image, width: width, height: height, flip: 0)
+        return RawBitmap(image: image, width: width, height: height, flip: 0,
+                         histogram: histogram)
     }
 
     func callCount() -> Int {

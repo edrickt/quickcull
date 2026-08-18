@@ -66,6 +66,11 @@ public actor DecodeEngine {
                                 do {
                                     let bitmap = try self.decoder.decodeRaw(at: file.url)
                                     try await self.cache.storeJPEG(bitmap, for: file)
+                                    // Histogram sidecar is best-effort: its failure
+                                    // must never fail the import.
+                                    if let hist = bitmap.histogram {
+                                        try? await self.cache.storeHistogram(hist, for: file)
+                                    }
                                     outcome = DecodeOutcome(file: file, error: nil)
                                 } catch let error as DecodeError {
                                     outcome = DecodeOutcome(file: file, error: error)
