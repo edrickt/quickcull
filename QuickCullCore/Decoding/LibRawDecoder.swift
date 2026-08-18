@@ -98,8 +98,8 @@ public final class LibRawDecoder: RawDecoding {
         for row in 0..<h {
             let rowOffset = (row + top) * rawW
             for col in 0..<w {
-                // dcraw fcol: Bayer color at (row,col)
-                let c = Int((filters >> (((row & 1) << 1 | (col & 1)) << 1)) & 3)
+                // dcraw fcol: Bayer color at absolute raw coordinate (row+top, col+left)
+                let c = Int((filters >> (((((row + top) & 1) << 1 | ((col + left) & 1)) << 1)) & 3))
                 // 0=R, 1=G, 2=B, 3=G2 → merge G2 into green (index 1)
                 let channel = c == 3 ? 1 : c
                 let v = Int(ptr[rowOffset + col + left])

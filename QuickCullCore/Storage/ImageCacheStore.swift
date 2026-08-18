@@ -109,8 +109,17 @@ public actor ImageCacheStore {
         return hist
     }
 
+    public func deleteCachedHistogram(for file: SessionFile) {
+        if let url = try? histogramURL(for: file) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     public func deleteCachedJPEG(for file: SessionFile) {
         if let url = try? cacheURL(for: file) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        if let url = try? histogramURL(for: file) {
             try? FileManager.default.removeItem(at: url)
         }
     }

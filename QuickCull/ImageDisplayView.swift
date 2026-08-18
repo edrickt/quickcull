@@ -347,14 +347,21 @@ private struct MetadataHUDView: View {
             }
             .padding(10)
         }
+        // Compound task id includes cgImage dimensions so thumb (320px) → full-res upgrade reruns
+        // and updates dimensions; detached utility task runs file I/O off main.
+        // Note: Task.detached is not a child of the outer .task, so cancellation of the outer
+        // task (on rapid scrub) does not automatically cancel the detached work; the outer
+        // .task discards its result when cancelled and only the latest file/dimensions wins.
         .task(id: "\(file.id)-\(cgImage?.width ?? 0)x\(cgImage?.height ?? 0)") {
-            metadata = await Task.detached(priority: .utility) {
+            histogram = nil
+            async let meta = Task.detached(priority: .utility) {
                 ImageMetadataProvider.metadata(for: file, cgImage: cgImage)
             }.value
-            // Raw histogram sidecar first; display fallback for non-RAW/missing.
-            histogram = await Task.detached(priority: .utility) {
+            async let hist = Task.detached(priority: .utility) {
                 (try? await cache.loadHistogram(for: file)) ?? cgImage.map { DisplayHistogram.compute(from: $0) }
             }.value
+            metadata = await meta
+            histogram = await hist
         }
     }
 
@@ -386,10 +393,11 @@ private struct RawHistogramView: View {
         Canvas { ctx, size in
             let binCount = RawHistogram.binCount
             guard size.width > 0, size.height > 0 else { return }
-            let logMax = histogram.bins
+            let rawMax = histogram.bins
                 .flatMap { $0 }
                 .map { log10(Double($0) + 1) }
-                .max() ?? 1
+                .max() ?? 0
+            let logMax = rawMax > 0 ? rawMax : 1
             func yFor(_ count: Int) -> Double {
                 size.height * (1 - log10(Double(count) + 1) / logMax)
             }
