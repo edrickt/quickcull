@@ -1,5 +1,8 @@
 import SwiftUI
 import QuickCullCore
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct ImageDisplayView: View {
     @Environment(AppState.self) private var appState
@@ -98,7 +101,7 @@ struct ImageDisplayView: View {
 /// Zoomable container for the main viewer image.
 /// - Pinch (trackpad) scales 1x…4x.
 /// - Double-click toggles fit (1x) ↔ 200% (2x). Any zoomed state double-click unzooms.
-/// - Drag pans when zoomed, clamped so the image never leaves the viewport.
+/// - Drag pans when zoomed (mouse drag + trackpad two-finger scroll), clamped so the image never leaves the viewport.
 private struct ZoomableImageView: View {
     let cgImage: CGImage
     let fileID: String?
@@ -107,6 +110,9 @@ private struct ZoomableImageView: View {
     @Binding var lastScale: CGFloat
     @Binding var offset: CGSize
     @Binding var lastOffset: CGSize
+
+    @State private var globalFrame: CGRect = .zero
+    @State private var scrollMonitor: Any?
 
     var body: some View {
         GeometryReader { geo in
@@ -129,6 +135,28 @@ private struct ZoomableImageView: View {
             }
             .gesture(magnificationGesture(container: container, fitted: fitted))
             .simultaneousGesture(dragGesture(container: container, fitted: fitted))
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { globalFrame = proxy.frame(in: .global) }
+                        .onChange(of: proxy.frame(in: .global)) { _, newFrame in globalFrame = newFrame }
+                }
+            )
+            .onAppear { installScrollMonitor(container: container, fitted: fitted) }
+            .onDisappear { removeScrollMonitor() }
+            .onChange(of: scale) { _, _ in installScrollMonitor(container: container, fitted: fitted) }
+            .onChange(of: container.width) { _, _ in
+                guard scale > 1.01 else { return }
+                let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
+                if clamped != offset { offset = clamped; lastOffset = clamped }
+                installScrollMonitor(container: container, fitted: fitted)
+            }
+            .onChange(of: container.height) { _, _ in
+                guard scale > 1.01 else { return }
+                let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
+                if clamped != offset { offset = clamped; lastOffset = clamped }
+                installScrollMonitor(container: container, fitted: fitted)
+            }
             .onChange(of: fileID) { _, _ in
                 // Persist zoom scale across images; re-center pan for the new photo.
                 // Keep scale/lastScale, reset offset so each new image appears centered
@@ -137,17 +165,48 @@ private struct ZoomableImageView: View {
                 offset = .zero
                 lastOffset = .zero
             }
-            .onChange(of: container.width) { _, _ in
-                guard scale > 1.01 else { return }
-                let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
-                if clamped != offset { offset = clamped; lastOffset = clamped }
-            }
-            .onChange(of: container.height) { _, _ in
-                guard scale > 1.01 else { return }
-                let clamped = clampedOffset(offset, container: container, fitted: fitted, scale: scale)
-                if clamped != offset { offset = clamped; lastOffset = clamped }
-            }
         }
+    }
+
+    private func installScrollMonitor(container: CGSize, fitted: CGSize) {
+        removeScrollMonitor()
+#if canImport(AppKit)
+        // Capture bindings so event-time reads see current zoom/pan values, not install-time snapshot.
+        let offsetBinding = $offset
+        let lastOffsetBinding = $lastOffset
+        let scaleBinding = $scale
+        let frameBinding = $globalFrame
+        // Capture container/fitted as values at install time (reinstalled on resize/scale change).
+        let containerSnap = container
+        let fittedSnap = fitted
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            let currentScale = scaleBinding.wrappedValue
+            guard currentScale > 1.01 else { return event }
+            guard event.hasPreciseScrollingDeltas else { return event }
+            let mouse = NSEvent.mouseLocation
+            guard frameBinding.wrappedValue.contains(mouse) else { return event }
+            let delta = CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)
+            if abs(delta.width) < 0.1 && abs(delta.height) < 0.1 { return event }
+            let currentOffset = offsetBinding.wrappedValue
+            let new = CGSize(width: currentOffset.width - delta.width, height: currentOffset.height - delta.height)
+            let clamped = clampedOffset(new, container: containerSnap, fitted: fittedSnap, scale: currentScale)
+            // Mutate on main
+            DispatchQueue.main.async {
+                offsetBinding.wrappedValue = clamped
+                lastOffsetBinding.wrappedValue = clamped
+            }
+            return nil
+        }
+#endif
+    }
+
+    private func removeScrollMonitor() {
+#if canImport(AppKit)
+        if let m = scrollMonitor {
+            NSEvent.removeMonitor(m)
+            scrollMonitor = nil
+        }
+#endif
     }
 
     // MARK: - Gestures
