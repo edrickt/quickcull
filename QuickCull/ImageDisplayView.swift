@@ -419,7 +419,7 @@ private struct RawHistogramView: View {
                 path.closeSubpath()
                 ctx.fill(path, with: .color(colors[channel]))
             }
-            if histogram.clipping.contains(where: { $0 > 0.001 }) {
+            if histogram.clipping.prefix(3).contains(where: { $0 > 0.001 }) {
                 var line = Path()
                 line.move(to: CGPoint(x: size.width - 1, y: 0))
                 line.addLine(to: CGPoint(x: size.width - 1, y: size.height))

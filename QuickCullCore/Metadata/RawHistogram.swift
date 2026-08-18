@@ -1,12 +1,19 @@
 import CoreGraphics
 import Foundation
 
+/// Linear sensor histogram (256 bins × RGB) computed from LibRaw's
+/// unpacked raw data, plus a display-histogram fallback for non-RAW files.
 public struct RawHistogram: Codable, Equatable, Sendable {
     public static let binCount = 256
+    /// Per-channel counts: [red, green, blue], 256 bins each.
     public let bins: [[Int]]
+    /// Overall-exposure luminance (Rec. 709 Y), 256 bins.
     public let luminance: [Int]
+    /// Highest possible sensor level (e.g. 16383 for 14-bit).
     public let sensorMax: Int
+    /// Total samples per entry (R, G, B, luminance).
     public var samples: [Int] { (bins + [luminance]).map { $0.reduce(0, +) } }
+    /// Fraction of samples at the top bin per entry (0...1).
     public var clipping: [Double] {
         (bins + [luminance]).map { b in
             guard !b.isEmpty else { return 0 }
@@ -37,6 +44,7 @@ public struct RawHistogram: Codable, Equatable, Sendable {
     }
 }
 
+/// Histogram of a rendered CGImage (fallback for non-RAW files).
 public enum DisplayHistogram {
     public static func compute(from cgImage: CGImage) -> RawHistogram {
         let width = cgImage.width, height = cgImage.height
@@ -57,8 +65,9 @@ public enum DisplayHistogram {
             bins[0][r * (RawHistogram.binCount - 1) / 255] += 1
             bins[1][g * (RawHistogram.binCount - 1) / 255] += 1
             bins[2][b * (RawHistogram.binCount - 1) / 255] += 1
-            let y = Int((0.2126 * Double(r) + 0.7152 * Double(g) + 0.0722 * Double(b)).rounded())
-            lum[y * (RawHistogram.binCount - 1) / 255] += 1
+            let y = min(255, max(0, Int((0.2126 * Double(r) + 0.7152 * Double(g) + 0.0722 * Double(b)).rounded())))
+            let yBin = min(RawHistogram.binCount - 1, max(0, y * (RawHistogram.binCount - 1) / 255))
+            lum[yBin] += 1
         }
         return RawHistogram(bins: bins, luminance: lum, sensorMax: 255)
     }

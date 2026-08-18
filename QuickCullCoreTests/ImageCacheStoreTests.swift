@@ -114,6 +114,15 @@ final class ImageCacheStoreTests: XCTestCase {
         XCTAssertEqual(loaded, hist)
     }
 
+    func testStoreAndLoadHistogramWithLuminance() async throws {
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "e.cr2", in: base))
+        var lum = [Int](repeating: 0, count: RawHistogram.binCount); lum[5]=42; lum[200]=7
+        let hist = RawHistogram(bins: [[0,1,2],[3,4,5],[6,7,8]], luminance: lum, sensorMax: 16383)
+        try await store.storeHistogram(hist, for: file)
+        let loaded = try await store.loadHistogram(for: file)
+        XCTAssertEqual(loaded, hist)
+    }
+
     func testLoadHistogramMissingReturnsNil() async throws {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "b.cr2", in: base))
         let loaded = try await store.loadHistogram(for: file)
