@@ -26,6 +26,7 @@ public final class AppState {
     public private(set) var isCommitting: Bool = false
     public private(set) var pendingMoveCount: Int = 0
     public private(set) var pendingMoveDestination: URL?
+    /// `internal(set)` so tests can inject failures; app code treats as read-only.
     public internal(set) var moveFailures: [MoveOutcome] = []
     public private(set) var isMoving: Bool = false
     private let mover: Moving
@@ -208,7 +209,7 @@ public final class AppState {
     }
 
     public func setCurrentIndex(_ index: Int) {
-        guard let session, phase == .scrubbing else { return }
+        guard let session, phase == .scrubbing, !isMoving, !isCommitting else { return }
         session.setIndex(index)
         syncWindows()
     }
@@ -218,6 +219,7 @@ public final class AppState {
     /// outside the scrubbing phase, and when `filter` is already active
     /// (the windows already cover that projection).
     public func setFilter(_ filter: CullFilter) {
+        guard !isMoving, !isCommitting else { return }
         guard let session, phase == .scrubbing else { return }
         guard session.filter != filter else { return }
         session.setFilter(filter)
@@ -269,7 +271,7 @@ public final class AppState {
     }
 
     public func handleGridDoubleClick(id: String) {
-        guard !isCommitting, let idx = session?.files.firstIndex(where: { $0.id == id }) else { return }
+        guard !isCommitting, !isMoving, let idx = session?.files.firstIndex(where: { $0.id == id }) else { return }
         session?.setIndex(idx)
         syncWindows()
         viewMode = .scrub
@@ -296,7 +298,7 @@ public final class AppState {
     }
 
     public func confirmCommit() async {
-        guard let session, !isCommitting else { return }
+        guard let session, !isCommitting, !isMoving else { return }
         let flagged = session.flaggedFiles
         isCommitting = true
         let outcomes = await Task.detached(priority: .userInitiated) {
@@ -325,10 +327,12 @@ public final class AppState {
     }
 
     public func requestMove(to dest: URL) {
+        guard !isMoving, !isCommitting else { return }
         pendingMoveCount = session?.flaggedCount ?? 0
         pendingMoveDestination = dest
     }
     public func cancelMove() {
+        guard !isMoving, !isCommitting else { return }
         pendingMoveCount = 0
         pendingMoveDestination = nil
     }

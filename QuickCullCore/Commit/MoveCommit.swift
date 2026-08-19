@@ -40,13 +40,40 @@ public struct MoveCommit {
 
     public func commit(files: [SessionFile], to folder: URL) -> [MoveOutcome] {
         files.map { file in
-            let dest = autoRenamedDestination(for: file, in: folder)
-            do {
-                try mover.move(from: file.url, to: dest)
-                return MoveOutcome(file: file, error: nil)
-            } catch {
-                return MoveOutcome(file: file, error: error)
+            let base = file.url.deletingPathExtension().lastPathComponent
+            let ext = file.url.pathExtension
+            var dest = autoRenamedDestination(for: file, in: folder)
+            // Derive next suffix for TOCTOU retry: dest is .../base.ext or .../base N.ext
+            var nextSuffix: Int = 1
+            let baseName = ext.isEmpty ? base : "\(base).\(ext)"
+            if dest.lastPathComponent != baseName {
+                let nameNoExt = dest.deletingPathExtension().lastPathComponent
+                if nameNoExt.hasPrefix(base + " ") {
+                    let suffixStr = String(nameNoExt.dropFirst(base.count + 1))
+                    if let parsed = Int(suffixStr) { nextSuffix = parsed + 1 }
+                }
             }
+            var attempts = 0
+            while attempts < 100 {
+                do {
+                    try mover.move(from: file.url, to: dest)
+                    return MoveOutcome(file: file, error: nil)
+                } catch let e as NSError where e.domain == NSCocoaErrorDomain && e.code == NSFileWriteFileExistsError {
+                    // TOCTOU: destination was created between check and move — retry with next suffix.
+                    let name = ext.isEmpty ? "\(base) \(nextSuffix)" : "\(base) \(nextSuffix).\(ext)"
+                    dest = folder.appendingPathComponent(name)
+                    nextSuffix += 1
+                    attempts += 1
+                    continue
+                } catch {
+                    return MoveOutcome(file: file, error: error)
+                }
+            }
+            return MoveOutcome(
+                file: file,
+                error: NSError(
+                    domain: NSCocoaErrorDomain, code: NSFileWriteFileExistsError,
+                    userInfo: [NSLocalizedDescriptionKey: "Move failed after retries: destination exists"]))
         }
     }
 }
