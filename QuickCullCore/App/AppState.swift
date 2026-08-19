@@ -23,9 +23,11 @@ public final class AppState {
     public private(set) var importFailures: [DecodeOutcome] = []
     public private(set) var commitFailures: [TrashOutcome] = []
     public private(set) var pendingCommitCount: Int = 0
+    public private(set) var pendingCommitColor: FlagColor?
     public private(set) var isCommitting: Bool = false
     public private(set) var pendingMoveCount: Int = 0
     public private(set) var pendingMoveDestination: URL?
+    public private(set) var pendingMoveColor: FlagColor?
     /// `internal(set)` so tests can inject failures; app code treats as read-only.
     public internal(set) var moveFailures: [MoveOutcome] = []
     public private(set) var isMoving: Bool = false
@@ -68,9 +70,11 @@ public final class AppState {
         importFailures = []
         commitFailures = []
         pendingCommitCount = 0
+        pendingCommitColor = nil
         isCommitting = false
         pendingMoveCount = 0
         pendingMoveDestination = nil
+        pendingMoveColor = nil
         moveFailures = []
         isMoving = false
         gridSelection = []
@@ -93,8 +97,11 @@ public final class AppState {
                 DecodeOutcome(file: SessionFile(url: $0),
                               error: .cannotOpen("Unsupported format"))
             }
+            pendingCommitCount = 0
+            pendingCommitColor = nil
             pendingMoveCount = 0
             pendingMoveDestination = nil
+            pendingMoveColor = nil
             moveFailures = []
             isMoving = false
             phase = .empty
@@ -112,8 +119,10 @@ public final class AppState {
         importFailures = []
         commitFailures = []
         pendingCommitCount = 0
+        pendingCommitColor = nil
         pendingMoveCount = 0
         pendingMoveDestination = nil
+        pendingMoveColor = nil
         moveFailures = []
         isMoving = false
         phase = .decoding(completed: 0, total: files.count)
@@ -293,13 +302,16 @@ public final class AppState {
         // Optional: if radius were tight, ensureLoaded would be called, but radius 1 suffices.
     }
 
-    public func requestCommit() {
-        pendingCommitCount = session?.flaggedCount ?? 0
+    public func requestCommit(color: FlagColor? = nil) {
+        pendingCommitColor = color
+        pendingCommitCount = session?.flaggedCount(color) ?? 0
     }
 
     public func confirmCommit() async {
         guard let session, !isCommitting, !isMoving else { return }
-        let flagged = session.flaggedFiles
+        let color = pendingCommitColor
+        let flagged = session.flaggedFiles(color)
+        guard !flagged.isEmpty else { pendingCommitCount = 0; pendingCommitColor = nil; return }
         isCommitting = true
         let outcomes = await Task.detached(priority: .userInitiated) {
             TrashCommit(trasher: self.trasher).commit(files: flagged)
@@ -309,6 +321,7 @@ public final class AppState {
         gridSelection = gridSelection.filter { session.contains(id: $0) }
         commitFailures = outcomes.filter { !$0.succeeded }
         pendingCommitCount = 0
+        pendingCommitColor = nil
         isCommitting = false
         if session.isEmpty {
             self.session = nil
@@ -324,22 +337,25 @@ public final class AppState {
 
     public func cancelCommit() {
         pendingCommitCount = 0
+        pendingCommitColor = nil
     }
 
-    public func requestMove(to dest: URL) {
+    public func requestMove(to dest: URL, color: FlagColor? = nil) {
         guard !isMoving, !isCommitting else { return }
-        pendingMoveCount = session?.flaggedCount ?? 0
+        pendingMoveCount = session?.flaggedCount(color) ?? 0
         pendingMoveDestination = dest
+        pendingMoveColor = color
     }
     public func cancelMove() {
         guard !isMoving, !isCommitting else { return }
         pendingMoveCount = 0
         pendingMoveDestination = nil
+        pendingMoveColor = nil
     }
     public func confirmMove() async {
         guard let session, !isCommitting, !isMoving, let dest = pendingMoveDestination else { return }
-        let flagged = session.flaggedFiles
-        guard !flagged.isEmpty else { pendingMoveCount = 0; pendingMoveDestination = nil; return }
+        let flagged = session.flaggedFiles(pendingMoveColor)
+        guard !flagged.isEmpty else { pendingMoveCount = 0; pendingMoveDestination = nil; pendingMoveColor = nil; return }
         isMoving = true
         let outcomes = await Task.detached(priority: .userInitiated) {
             MoveCommit(mover: self.mover).commit(files: flagged, to: dest)
@@ -350,6 +366,7 @@ public final class AppState {
         moveFailures = outcomes.filter { !$0.succeeded }
         pendingMoveCount = 0
         pendingMoveDestination = nil
+        pendingMoveColor = nil
         isMoving = false
         if session.isEmpty {
             self.session = nil
