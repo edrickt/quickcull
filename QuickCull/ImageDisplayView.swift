@@ -47,8 +47,8 @@ struct ImageDisplayView: View {
                             ZStack {
                                 Color.black
                                 if let img = leftCG, let file = currentFile {
-                                    ZoomableImageView(cgImage: img, fileID: file.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
-                                        .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: file) }
+                                    let flagColor = appState.session?.flagColor(for: file)
+                                    ZoomableImageView(cgImage: img, fileID: file.id, flagColor: flagColor, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
                                 } else { Color.black }
                             }.frame(width: geo.size.width, height: geo.size.height)
                         }.clipped()
@@ -56,7 +56,7 @@ struct ImageDisplayView: View {
                             ZStack {
                                 Color.black
                                 if let img = rightCG, rightFile != nil {
-                                    ZoomableImageView(cgImage: img, fileID: currentFile?.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
+                                    ZoomableImageView(cgImage: img, fileID: rightFile?.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
                                 } else if rightFile == nil {
                                     VStack(spacing: 8) { Image(systemName:"photo.slash").font(.title2).foregroundStyle(.secondary)
                                                          Text("No next image").font(.caption).foregroundStyle(.secondary) }
@@ -96,6 +96,7 @@ struct ImageDisplayView: View {
                 .animation(.easeInOut(duration: 0.2), value: hudVisible)
                 .animation(.easeInOut(duration: 0.15), value: appState.viewMode)
             } else if let cgImage = leftCG { // Single (existing)
+                let flagColor = currentFile.flatMap { appState.session?.flagColor(for: $0) }
                 HStack(spacing: 8) { // was spacing:0 with Divider() after HUD — gap via spacing 8 + Color.black
                     if hudVisible, let file = currentFile {
                         MetadataHUDView(file: file, cgImage: cgImage, cache: appState.cache).frame(width: 240).background(.ultraThinMaterial).transition(.move(edge:.leading).combined(with:.opacity))
@@ -104,11 +105,10 @@ struct ImageDisplayView: View {
                     GeometryReader { geo in
                         ZStack {
                             Color.black
-                            ZoomableImageView(cgImage: cgImage, fileID: currentFile?.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
+                            ZoomableImageView(cgImage: cgImage, fileID: currentFile?.id, flagColor: flagColor, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
                         }.frame(width: geo.size.width, height: geo.size.height)
                     }.clipped()
                 }
-                .overlay(alignment: .topTrailing) { FlagBadgeOverlay(file: currentFile) }
                 .animation(.easeInOut(duration: 0.2), value: hudVisible)
             } else {
                 ProgressView().controlSize(.large)
@@ -125,6 +125,7 @@ struct ImageDisplayView: View {
 private struct ZoomableImageView: View {
     let cgImage: CGImage
     let fileID: String?
+    var flagColor: FlagColor? = nil
 
     @Binding var scale: CGFloat
     @Binding var lastScale: CGFloat
@@ -148,6 +149,15 @@ private struct ZoomableImageView: View {
                     .frame(width: fitted.width, height: fitted.height)
                     .scaleEffect(scale)
                     .offset(offset)
+                if let c = flagColor {
+                    Color.clear
+                        .frame(width: fitted.width * scale, height: fitted.height * scale)
+                        .overlay(alignment: .topTrailing) {
+                            FlagBadge(color: c, size: 44)
+                        }
+                        .offset(offset)
+                        .allowsHitTesting(false)
+                }
             }
             .frame(width: container.width, height: container.height)
             .contentShape(Rectangle())
