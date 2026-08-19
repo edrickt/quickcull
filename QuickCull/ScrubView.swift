@@ -61,9 +61,9 @@ struct ScrubView: View {
                     set: { appState.setFilter($0) }
                 )) {
                     Text("All").tag(CullFilter.all)
-                    Text("Red (\(appState.session?.flaggedCount(.red) ?? 0))").tag(CullFilter.red)
-                    Text("Yellow (\(appState.session?.flaggedCount(.yellow) ?? 0))").tag(CullFilter.yellow)
-                    Text("Green (\(appState.session?.flaggedCount(.green) ?? 0))").tag(CullFilter.green)
+                    Text("R (\(appState.session?.flaggedCount(.red) ?? 0))").tag(CullFilter.red)
+                    Text("Y (\(appState.session?.flaggedCount(.yellow) ?? 0))").tag(CullFilter.yellow)
+                    Text("G (\(appState.session?.flaggedCount(.green) ?? 0))").tag(CullFilter.green)
                     Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount() } ?? 0))").tag(CullFilter.keepers)
                 }
                 .pickerStyle(.segmented)
@@ -77,13 +77,13 @@ struct ScrubView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("Trash Red (\(appState.session?.flaggedCount(.red) ?? 0))", role: .destructive) {
+                    Button("Trash R (\(appState.session?.flaggedCount(.red) ?? 0))", role: .destructive) {
                         appState.requestCommit(color: .red); showCommitConfirm = true
                     }.disabled((appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Trash Yellow (\(appState.session?.flaggedCount(.yellow) ?? 0))", role: .destructive) {
+                    Button("Trash Y (\(appState.session?.flaggedCount(.yellow) ?? 0))", role: .destructive) {
                         appState.requestCommit(color: .yellow); showCommitConfirm = true
                     }.disabled((appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Trash Green (\(appState.session?.flaggedCount(.green) ?? 0))", role: .destructive) {
+                    Button("Trash G (\(appState.session?.flaggedCount(.green) ?? 0))", role: .destructive) {
                         appState.requestCommit(color: .green); showCommitConfirm = true
                     }.disabled((appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
                     Button("Trash All Flagged (\(appState.session?.flaggedCount() ?? 0))", role: .destructive) {
@@ -101,17 +101,17 @@ struct ScrubView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("Move Red (\(appState.session?.flaggedCount(.red) ?? 0))") {
+                    Button("Move R (\(appState.session?.flaggedCount(.red) ?? 0))") {
                         if let dest = chooseMoveDestination() {
                             appState.requestMove(to: dest, color: .red); showMoveConfirm = true
                         }
                     }.disabled((appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Move Yellow (\(appState.session?.flaggedCount(.yellow) ?? 0))") {
+                    Button("Move Y (\(appState.session?.flaggedCount(.yellow) ?? 0))") {
                         if let dest = chooseMoveDestination() {
                             appState.requestMove(to: dest, color: .yellow); showMoveConfirm = true
                         }
                     }.disabled((appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Move Green (\(appState.session?.flaggedCount(.green) ?? 0))") {
+                    Button("Move G (\(appState.session?.flaggedCount(.green) ?? 0))") {
                         if let dest = chooseMoveDestination() {
                             appState.requestMove(to: dest, color: .green); showMoveConfirm = true
                         }
@@ -132,7 +132,7 @@ struct ScrubView: View {
                 .disabled(appState.isCommitting || appState.isMoving)
             }
         }
-        .alert("Move \(appState.pendingCommitCount) \(appState.pendingCommitColor?.displayName.lowercased() ?? "flagged") file(s) to Trash?",
+        .alert("Move \(appState.pendingCommitCount) \(appState.pendingCommitColor?.displayName ?? "flagged") file(s) to Trash?",
                isPresented: $showCommitConfirm) {
             Button("Move to Trash", role: .destructive) {
                 Task { await appState.confirmCommit() }
@@ -141,13 +141,13 @@ struct ScrubView: View {
         } message: {
             Text("Flagged files will be removed from this session. Scrubbing continues with the rest.")
         }
-        .alert("Could not move \(appState.commitFailures.count) \(appState.lastCommitColor?.displayName.lowercased() ?? "flagged") file(s) to Trash",
+        .alert("Could not move \(appState.commitFailures.count) \(appState.lastCommitColor?.displayName ?? "flagged") file(s) to Trash",
                isPresented: $showCommitFailures) {
             Button("OK", role: .cancel) { }
         } message: {
             Text("The remaining files keep their flags. You may need to grant file access in System Settings.")
         }
-        .alert("Move \(appState.pendingMoveCount) \(appState.pendingMoveColor?.displayName.lowercased() ?? "flagged") file(s) to \"\(appState.pendingMoveDestination?.lastPathComponent ?? "")\"?",
+        .alert("Move \(appState.pendingMoveCount) \(appState.pendingMoveColor?.displayName ?? "flagged") file(s) to \"\(appState.pendingMoveDestination?.lastPathComponent ?? "")\"?",
                isPresented: $showMoveConfirm) {
             Button("Move", role: .none) {
                 Task { await appState.confirmMove() }
@@ -156,7 +156,7 @@ struct ScrubView: View {
         } message: {
             Text("Flagged files will be moved to the selected folder and removed from this session. Scrubbing continues with the rest.")
         }
-        .alert("Could not move \(appState.moveFailures.count) \(appState.lastMoveColor?.displayName.lowercased() ?? "flagged") file(s)",
+        .alert("Could not move \(appState.moveFailures.count) \(appState.lastMoveColor?.displayName ?? "flagged") file(s)",
                isPresented: $showMoveFailures) {
             Button("OK", role: .cancel) { }
         } message: {
