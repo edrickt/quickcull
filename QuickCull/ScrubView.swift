@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import QuickCullCore
 
@@ -6,6 +7,8 @@ struct ScrubView: View {
     @State private var showCommitConfirm = false
     @State private var showCommitFailures = false
     @State private var showNewSessionConfirm = false
+    @State private var showMoveConfirm = false
+    @State private var showMoveFailures = false
     // Zoom persists across images while staying in single-view mode, but
     // resets when leaving single (to grid) so a grid round-trip never
     // restores a stale 200% zoom. Hoisted here because ImageDisplayView is
@@ -40,7 +43,7 @@ struct ScrubView: View {
                 Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
                     .fontWeight(.light)
                     .help(hudVisible ? "Hide metadata" : "Show metadata")
-                    .disabled(appState.isCommitting)
+                    .disabled(appState.isCommitting || appState.isMoving)
             }
             ToolbarItem(placement: .primaryAction) {
                 Picker("View", selection: Binding(
@@ -50,7 +53,7 @@ struct ScrubView: View {
                     Text("Single").tag(AppState.ViewMode.scrub)
                     Text("Split").tag(AppState.ViewMode.split)
                     Text("Grid").tag(AppState.ViewMode.grid)
-                }.pickerStyle(.segmented).fontWeight(.light).disabled(appState.isCommitting)
+                }.pickerStyle(.segmented).fontWeight(.light).disabled(appState.isCommitting || appState.isMoving)
             }
             ToolbarItem(placement: .primaryAction) {
                 Picker("Filter", selection: Binding(
@@ -64,12 +67,12 @@ struct ScrubView: View {
                 }
                 .pickerStyle(.segmented)
                 .fontWeight(.light)
-                .disabled(appState.isCommitting)
+                .disabled(appState.isCommitting || appState.isMoving)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button("New Session") { showNewSessionConfirm = true }
                     .fontWeight(.light)
-                    .disabled(appState.isCommitting)
+                    .disabled(appState.isCommitting || appState.isMoving)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -83,7 +86,30 @@ struct ScrubView: View {
                     }
                 }
                 .fontWeight(.light)
-                .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting)
+                .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting || appState.isMoving)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    let panel = NSOpenPanel()
+                    panel.canChooseFiles = false
+                    panel.canChooseDirectories = true
+                    panel.canCreateDirectories = true
+                    panel.allowsMultipleSelection = false
+                    panel.prompt = "Move"
+                    panel.message = "Choose a folder to move flagged images to"
+                    if panel.runModal() == .OK, let dest = panel.url {
+                        appState.requestMove(to: dest)
+                        showMoveConfirm = true
+                    }
+                } label: {
+                    if appState.isMoving {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Move Flagged", systemImage: "folder")
+                    }
+                }
+                .fontWeight(.light)
+                .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting || appState.isMoving)
             }
         }
         .alert("Move \(appState.pendingCommitCount) file(s) to Trash?",
@@ -101,6 +127,21 @@ struct ScrubView: View {
         } message: {
             Text("The remaining files keep their flags. You may need to grant file access in System Settings.")
         }
+        .alert("Move \(appState.pendingMoveCount) file(s) to \"\(appState.pendingMoveDestination?.lastPathComponent ?? "")\"?",
+               isPresented: $showMoveConfirm) {
+            Button("Move", role: .none) {
+                Task { await appState.confirmMove() }
+            }
+            Button("Cancel", role: .cancel) { appState.cancelMove() }
+        } message: {
+            Text("Flagged files will be moved to the selected folder and removed from this session. Scrubbing continues with the rest.")
+        }
+        .alert("Could not move \(appState.moveFailures.count) file(s)",
+               isPresented: $showMoveFailures) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("The remaining files keep their flags. You may need to grant file access in System Settings, or choose a writable folder.")
+        }
         .alert("Start new session?", isPresented: $showNewSessionConfirm) {
             Button("Start New Session", role: .destructive) { appState.startNewSession() }
             Button("Cancel", role: .cancel) { }
@@ -109,6 +150,9 @@ struct ScrubView: View {
         }
         .onChange(of: appState.commitFailures.count) {
             if appState.commitFailures.count > 0 { showCommitFailures = true }
+        }
+        .onChange(of: appState.moveFailures.count) {
+            if appState.moveFailures.count > 0 { showMoveFailures = true }
         }
         .onChange(of: appState.phase) { _, newPhase in
             // New import or empty session: reset zoom to fit so a stale 200% does not surprise the next shoot.
