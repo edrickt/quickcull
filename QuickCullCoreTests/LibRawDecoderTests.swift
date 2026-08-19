@@ -69,25 +69,34 @@ final class LibRawDecoderTests: XCTestCase {
     }
 
     func testHistogramComputedForRawFixtures() throws {
+        // FastRawViewer-style: linear Bayer histogram before demosaic.
+        // 7 Bayer fixtures have a raw histogram; fuji_e550 (super-CCD/X-Trans)
+        // returns nil and falls back to DisplayHistogram in the UI.
         let cases: [(name: String, ext: String)] = [
             ("img_0062", "cr2"), ("mg_2233", "cr3"), ("dsc8140", "nef"), ("dsc0258", "arw"),
-            ("fuji_e550", "raf"), ("olympus_c5050z", "orf"), ("p1000336", "rw2"), ("pentax_k01", "dng"),
+            ("olympus_c5050z", "orf"), ("p1000336", "rw2"), ("pentax_k01", "dng"),
         ]
         for c in cases {
             let bitmap = try decoder.decodeRaw(at: fixture(c.name, c.ext))
-            let hist = try XCTUnwrap(bitmap.histogram, "\(c.name).\(c.ext) should have a rendered histogram")
+            let hist = try XCTUnwrap(bitmap.histogram, "\(c.name).\(c.ext) should have a FastRawViewer RAW histogram")
             XCTAssertEqual(hist.bins.count, 3, c.name)
             XCTAssertTrue(hist.bins.allSatisfy { $0.count == RawHistogram.binCount }, c.name)
-            XCTAssertEqual(hist.sensorMax, 255, c.name)
+            XCTAssertGreaterThan(hist.sensorMax, 255, "\(c.name) raw sensorMax (e.g. 4095/16383)")
             XCTAssertEqual(hist.luminance.count, RawHistogram.binCount, c.name)
-            XCTAssertEqual(hist.samples[0], bitmap.width * bitmap.height, "\(c.name) R count")
-            XCTAssertEqual(hist.samples[1], bitmap.width * bitmap.height, "\(c.name) G count")
-            XCTAssertEqual(hist.samples[2], bitmap.width * bitmap.height, "\(c.name) B count")
-            XCTAssertEqual(hist.samples[3], bitmap.width * bitmap.height, "\(c.name) luma count")
-            XCTAssertEqual(hist.luminance.reduce(0,+), bitmap.width * bitmap.height, "\(c.name) luma sum")
-            // No bin negative, clipping in 0...1
+            let area = bitmap.width * bitmap.height
+            // Bayer: R ~1/4, G ~1/2 (G+G2 merged), B ~1/4, luma == w*h (every raw value)
+            XCTAssertEqual(hist.samples[0] + hist.samples[1] + hist.samples[2], area, "\(c.name) R+G+B == w*h (Bayer)")
+            XCTAssertEqual(hist.samples[3], area, "\(c.name) luma count")
+            XCTAssertEqual(hist.luminance.reduce(0,+), area, "\(c.name) luma sum")
             XCTAssertTrue(hist.clipping.allSatisfy{ $0 >= 0 && $0 <= 1 }, c.name)
+            // Sanity: R and B roughly quarter, G roughly half (allow ±2% for crop/margins)
+            let quarter = Double(area) / 4.0
+            XCTAssertEqual(Double(hist.samples[0]), quarter, accuracy: quarter * 0.02, "\(c.name) R ~1/4")
+            XCTAssertEqual(Double(hist.samples[2]), quarter, accuracy: quarter * 0.02, "\(c.name) B ~1/4")
+            XCTAssertEqual(Double(hist.samples[1]), quarter * 2, accuracy: quarter * 0.04, "\(c.name) G ~1/2")
         }
+        let fuji = try decoder.decodeRaw(at: fixture("fuji_e550","raf"))
+        XCTAssertNil(fuji.histogram, "super-CCD/X-Trans has no Bayer raw histogram — UI falls back to DisplayHistogram")
     }
 
     func testLuminanceComputedForBayerFixtures() throws {
@@ -98,15 +107,17 @@ final class LibRawDecoderTests: XCTestCase {
             XCTAssertEqual(hist.luminance.count, RawHistogram.binCount, c.name)
             XCTAssertEqual(hist.luminance.reduce(0,+), bitmap.width * bitmap.height, "\(c.name) luma sum == pixel count")
             XCTAssertEqual(hist.samples[3], bitmap.width * bitmap.height, c.name)
-            XCTAssertEqual(hist.sensorMax, 255, c.name)
+            XCTAssertGreaterThan(hist.sensorMax, 255, c.name)
         }
     }
 
     func testSuperCCDAndXTransNowHaveHistogram() throws {
         let fuji = try decoder.decodeRaw(at: fixture("fuji_e550","raf"))
-        let hist = try XCTUnwrap(fuji.histogram, "super-CCD should now have rendered histogram")
-        XCTAssertEqual(hist.sensorMax, 255)
-        XCTAssertEqual(hist.samples[0], fuji.width * fuji.height)
-        XCTAssertEqual(hist.luminance.count, RawHistogram.binCount)
+        XCTAssertNil(fuji.histogram, "super-CCD/X-Trans returns nil raw histogram; DisplayHistogram fallback used in UI")
+        // Fallback is rendered: verify DisplayHistogram still works for its CGImage
+        let fallback = DisplayHistogram.compute(from: fuji.image)
+        XCTAssertEqual(fallback.sensorMax, 255)
+        XCTAssertEqual(fallback.samples[0], fuji.width * fuji.height)
+        XCTAssertEqual(fallback.luminance.count, RawHistogram.binCount)
     }
 }

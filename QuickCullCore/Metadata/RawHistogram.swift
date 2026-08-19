@@ -1,8 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// Rendered sRGB histogram (8-bit post-demosaic, post-WB, post-gamma) plus
-/// weighted luminance (Rec.709 Y). sensorMax is 255 for rendered histograms.
+/// FastRawViewer-style RAW histogram: linear pre-WB/pre-gamma Bayer counts
+/// plus luminance (all raw values). sensorMax is the sensor maximum (e.g.
+/// 16383); 255 is used only for rendered DisplayHistogram fallback.
 public struct RawHistogram: Codable, Equatable, Sendable {
     public static let binCount = 256
     /// Per-channel counts: [red, green, blue], 256 bins each.
