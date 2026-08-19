@@ -102,26 +102,22 @@ struct ScrubView: View {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("Move Red (\(appState.session?.flaggedCount(.red) ?? 0))") {
-                        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Move"; panel.message = "Choose a folder to move flagged images to"
-                        if panel.runModal() == .OK, let dest = panel.url {
+                        if let dest = chooseMoveDestination() {
                             appState.requestMove(to: dest, color: .red); showMoveConfirm = true
                         }
                     }.disabled((appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
                     Button("Move Yellow (\(appState.session?.flaggedCount(.yellow) ?? 0))") {
-                        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Move"; panel.message = "Choose a folder to move flagged images to"
-                        if panel.runModal() == .OK, let dest = panel.url {
+                        if let dest = chooseMoveDestination() {
                             appState.requestMove(to: dest, color: .yellow); showMoveConfirm = true
                         }
                     }.disabled((appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
                     Button("Move Green (\(appState.session?.flaggedCount(.green) ?? 0))") {
-                        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Move"; panel.message = "Choose a folder to move flagged images to"
-                        if panel.runModal() == .OK, let dest = panel.url {
+                        if let dest = chooseMoveDestination() {
                             appState.requestMove(to: dest, color: .green); showMoveConfirm = true
                         }
                     }.disabled((appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
                     Button("Move All Flagged (\(appState.session?.flaggedCount() ?? 0))") {
-                        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Move"; panel.message = "Choose a folder to move flagged images to"
-                        if panel.runModal() == .OK, let dest = panel.url {
+                        if let dest = chooseMoveDestination() {
                             appState.requestMove(to: dest, color: nil); showMoveConfirm = true
                         }
                     }.disabled((appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving)
@@ -145,7 +141,7 @@ struct ScrubView: View {
         } message: {
             Text("Flagged files will be removed from this session. Scrubbing continues with the rest.")
         }
-        .alert("Could not move \(appState.commitFailures.count) \(appState.pendingCommitColor?.displayName.lowercased() ?? "flagged") file(s) to Trash",
+        .alert("Could not move \(appState.commitFailures.count) \(appState.lastCommitColor?.displayName.lowercased() ?? "flagged") file(s) to Trash",
                isPresented: $showCommitFailures) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -160,7 +156,7 @@ struct ScrubView: View {
         } message: {
             Text("Flagged files will be moved to the selected folder and removed from this session. Scrubbing continues with the rest.")
         }
-        .alert("Could not move \(appState.moveFailures.count) \(appState.pendingMoveColor?.displayName.lowercased() ?? "flagged") file(s)",
+        .alert("Could not move \(appState.moveFailures.count) \(appState.lastMoveColor?.displayName.lowercased() ?? "flagged") file(s)",
                isPresented: $showMoveFailures) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -233,5 +229,16 @@ struct ScrubView: View {
         return count > 3
             ? "\(count) file(s) could not be decoded: \(names) …"
             : "\(count) file(s) could not be decoded: \(names)"
+    }
+
+    private func chooseMoveDestination() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Move"
+        panel.message = "Choose a folder to move flagged images to"
+        return panel.runModal() == .OK ? panel.url : nil
     }
 }

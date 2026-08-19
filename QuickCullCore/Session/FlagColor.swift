@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 public enum FlagColor: String, CaseIterable, Sendable, Codable, Hashable {
     case red, yellow, green
@@ -8,8 +7,5 @@ public enum FlagColor: String, CaseIterable, Sendable, Codable, Hashable {
     }
     public var keyCode: UInt16 {
         switch self { case .red: 6; case .yellow: 7; case .green: 8 }
-    }
-    public var uiColor: Color {
-        switch self { case .red: .red; case .yellow: .yellow; case .green: .green }
     }
 }

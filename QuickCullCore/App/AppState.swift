@@ -24,10 +24,12 @@ public final class AppState {
     public private(set) var commitFailures: [TrashOutcome] = []
     public private(set) var pendingCommitCount: Int = 0
     public private(set) var pendingCommitColor: FlagColor?
+    public private(set) var lastCommitColor: FlagColor?
     public private(set) var isCommitting: Bool = false
     public private(set) var pendingMoveCount: Int = 0
     public private(set) var pendingMoveDestination: URL?
     public private(set) var pendingMoveColor: FlagColor?
+    public private(set) var lastMoveColor: FlagColor?
     /// `internal(set)` so tests can inject failures; app code treats as read-only.
     public internal(set) var moveFailures: [MoveOutcome] = []
     public private(set) var isMoving: Bool = false
@@ -71,10 +73,12 @@ public final class AppState {
         commitFailures = []
         pendingCommitCount = 0
         pendingCommitColor = nil
+        lastCommitColor = nil
         isCommitting = false
         pendingMoveCount = 0
         pendingMoveDestination = nil
         pendingMoveColor = nil
+        lastMoveColor = nil
         moveFailures = []
         isMoving = false
         gridSelection = []
@@ -99,9 +103,11 @@ public final class AppState {
             }
             pendingCommitCount = 0
             pendingCommitColor = nil
+            lastCommitColor = nil
             pendingMoveCount = 0
             pendingMoveDestination = nil
             pendingMoveColor = nil
+            lastMoveColor = nil
             moveFailures = []
             isMoving = false
             phase = .empty
@@ -120,9 +126,11 @@ public final class AppState {
         commitFailures = []
         pendingCommitCount = 0
         pendingCommitColor = nil
+        lastCommitColor = nil
         pendingMoveCount = 0
         pendingMoveDestination = nil
         pendingMoveColor = nil
+        lastMoveColor = nil
         moveFailures = []
         isMoving = false
         phase = .decoding(completed: 0, total: files.count)
@@ -303,6 +311,7 @@ public final class AppState {
     }
 
     public func requestCommit(color: FlagColor? = nil) {
+        guard !isMoving, !isCommitting else { return }
         pendingCommitColor = color
         pendingCommitCount = session?.flaggedCount(color) ?? 0
     }
@@ -320,6 +329,7 @@ public final class AppState {
         session.remove(succeeded)
         gridSelection = gridSelection.filter { session.contains(id: $0) }
         commitFailures = outcomes.filter { !$0.succeeded }
+        lastCommitColor = commitFailures.isEmpty ? nil : color
         pendingCommitCount = 0
         pendingCommitColor = nil
         isCommitting = false
@@ -336,6 +346,7 @@ public final class AppState {
     }
 
     public func cancelCommit() {
+        guard !isMoving, !isCommitting else { return }
         pendingCommitCount = 0
         pendingCommitColor = nil
     }
@@ -354,7 +365,8 @@ public final class AppState {
     }
     public func confirmMove() async {
         guard let session, !isCommitting, !isMoving, let dest = pendingMoveDestination else { return }
-        let flagged = session.flaggedFiles(pendingMoveColor)
+        let color = pendingMoveColor
+        let flagged = session.flaggedFiles(color)
         guard !flagged.isEmpty else { pendingMoveCount = 0; pendingMoveDestination = nil; pendingMoveColor = nil; return }
         isMoving = true
         let outcomes = await Task.detached(priority: .userInitiated) {
@@ -364,6 +376,7 @@ public final class AppState {
         session.remove(succeeded)
         gridSelection = gridSelection.filter { session.contains(id: $0) }
         moveFailures = outcomes.filter { !$0.succeeded }
+        lastMoveColor = moveFailures.isEmpty ? nil : color
         pendingMoveCount = 0
         pendingMoveDestination = nil
         pendingMoveColor = nil
