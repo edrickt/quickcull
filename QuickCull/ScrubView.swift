@@ -61,9 +61,10 @@ struct ScrubView: View {
                     set: { appState.setFilter($0) }
                 )) {
                     Text("All").tag(CullFilter.all)
-                    Text("Flagged (\(appState.session?.flaggedCount ?? 0))").tag(CullFilter.flagged)
-                    Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount } ?? 0))")
-                        .tag(CullFilter.keepers)
+                    Text("Red (\(appState.session?.flaggedCount(.red) ?? 0))").tag(CullFilter.red)
+                    Text("Yellow (\(appState.session?.flaggedCount(.yellow) ?? 0))").tag(CullFilter.yellow)
+                    Text("Green (\(appState.session?.flaggedCount(.green) ?? 0))").tag(CullFilter.green)
+                    Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount() } ?? 0))").tag(CullFilter.keepers)
                 }
                 .pickerStyle(.segmented)
                 .fontWeight(.light)
@@ -75,9 +76,19 @@ struct ScrubView: View {
                     .disabled(appState.isCommitting || appState.isMoving)
             }
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    appState.requestCommit()
-                    showCommitConfirm = true
+                Menu {
+                    Button("Trash Red (\(appState.session?.flaggedCount(.red) ?? 0))", role: .destructive) {
+                        appState.requestCommit(color: .red); showCommitConfirm = true
+                    }.disabled((appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
+                    Button("Trash Yellow (\(appState.session?.flaggedCount(.yellow) ?? 0))", role: .destructive) {
+                        appState.requestCommit(color: .yellow); showCommitConfirm = true
+                    }.disabled((appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
+                    Button("Trash Green (\(appState.session?.flaggedCount(.green) ?? 0))", role: .destructive) {
+                        appState.requestCommit(color: .green); showCommitConfirm = true
+                    }.disabled((appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
+                    Button("Trash All Flagged (\(appState.session?.flaggedCount() ?? 0))", role: .destructive) {
+                        appState.requestCommit(color: nil); showCommitConfirm = true
+                    }.disabled((appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving)
                 } label: {
                     if appState.isCommitting {
                         ProgressView().controlSize(.small)
@@ -86,21 +97,34 @@ struct ScrubView: View {
                     }
                 }
                 .fontWeight(.light)
-                .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting || appState.isMoving)
+                .disabled(appState.isCommitting || appState.isMoving)
             }
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    let panel = NSOpenPanel()
-                    panel.canChooseFiles = false
-                    panel.canChooseDirectories = true
-                    panel.canCreateDirectories = true
-                    panel.allowsMultipleSelection = false
-                    panel.prompt = "Move"
-                    panel.message = "Choose a folder to move flagged images to"
-                    if panel.runModal() == .OK, let dest = panel.url {
-                        appState.requestMove(to: dest)
-                        showMoveConfirm = true
-                    }
+                Menu {
+                    Button("Move Red (\(appState.session?.flaggedCount(.red) ?? 0))") {
+                        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Move"; panel.message = "Choose a folder to move flagged images to"
+                        if panel.runModal() == .OK, let dest = panel.url {
+                            appState.requestMove(to: dest, color: .red); showMoveConfirm = true
+                        }
+                    }.disabled((appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
+                    Button("Move Yellow (\(appState.session?.flaggedCount(.yellow) ?? 0))") {
+                        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Move"; panel.message = "Choose a folder to move flagged images to"
+                        if panel.runModal() == .OK, let dest = panel.url {
+                            appState.requestMove(to: dest, color: .yellow); showMoveConfirm = true
+                        }
+                    }.disabled((appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
+                    Button("Move Green (\(appState.session?.flaggedCount(.green) ?? 0))") {
+                        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Move"; panel.message = "Choose a folder to move flagged images to"
+                        if panel.runModal() == .OK, let dest = panel.url {
+                            appState.requestMove(to: dest, color: .green); showMoveConfirm = true
+                        }
+                    }.disabled((appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
+                    Button("Move All Flagged (\(appState.session?.flaggedCount() ?? 0))") {
+                        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.allowsMultipleSelection = false; panel.prompt = "Move"; panel.message = "Choose a folder to move flagged images to"
+                        if panel.runModal() == .OK, let dest = panel.url {
+                            appState.requestMove(to: dest, color: nil); showMoveConfirm = true
+                        }
+                    }.disabled((appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving)
                 } label: {
                     if appState.isMoving {
                         ProgressView().controlSize(.small)
@@ -109,10 +133,10 @@ struct ScrubView: View {
                     }
                 }
                 .fontWeight(.light)
-                .disabled(appState.session?.flaggedCount == 0 || appState.isCommitting || appState.isMoving)
+                .disabled(appState.isCommitting || appState.isMoving)
             }
         }
-        .alert("Move \(appState.pendingCommitCount) file(s) to Trash?",
+        .alert("Move \(appState.pendingCommitCount) \(appState.pendingCommitColor?.displayName.lowercased() ?? "flagged") file(s) to Trash?",
                isPresented: $showCommitConfirm) {
             Button("Move to Trash", role: .destructive) {
                 Task { await appState.confirmCommit() }
@@ -121,13 +145,13 @@ struct ScrubView: View {
         } message: {
             Text("Flagged files will be removed from this session. Scrubbing continues with the rest.")
         }
-        .alert("Could not move \(appState.commitFailures.count) file(s) to Trash",
+        .alert("Could not move \(appState.commitFailures.count) \(appState.pendingCommitColor?.displayName.lowercased() ?? "flagged") file(s) to Trash",
                isPresented: $showCommitFailures) {
             Button("OK", role: .cancel) { }
         } message: {
             Text("The remaining files keep their flags. You may need to grant file access in System Settings.")
         }
-        .alert("Move \(appState.pendingMoveCount) file(s) to \"\(appState.pendingMoveDestination?.lastPathComponent ?? "")\"?",
+        .alert("Move \(appState.pendingMoveCount) \(appState.pendingMoveColor?.displayName.lowercased() ?? "flagged") file(s) to \"\(appState.pendingMoveDestination?.lastPathComponent ?? "")\"?",
                isPresented: $showMoveConfirm) {
             Button("Move", role: .none) {
                 Task { await appState.confirmMove() }
@@ -136,7 +160,7 @@ struct ScrubView: View {
         } message: {
             Text("Flagged files will be moved to the selected folder and removed from this session. Scrubbing continues with the rest.")
         }
-        .alert("Could not move \(appState.moveFailures.count) file(s)",
+        .alert("Could not move \(appState.moveFailures.count) \(appState.pendingMoveColor?.displayName.lowercased() ?? "flagged") file(s)",
                isPresented: $showMoveFailures) {
             Button("OK", role: .cancel) { }
         } message: {

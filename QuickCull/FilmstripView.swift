@@ -27,21 +27,21 @@ struct FilmstripView: View {
         // attributed to the cell views, whose in-place updates can be
         // dropped by a preempted render pass (badges stuck absent while the
         // viewer updates). A parent-body read re-keys the whole strip on
-        // every change and feeds `isFlagged` into `BadgedThumbnailView`,
+        // every change and feeds `flagColor` into `BadgedThumbnailView`,
         // which pins the badge to the image itself (not the placeholder
         // container) via `FlagBadgeLogic.shouldShow`.
         let files = appState.session?.files ?? []
-        let flagged = appState.session?.flagged ?? []
+        let flags = appState.session?.flags ?? [:]
         let currentIndex = appState.session?.currentIndex ?? 0
         // Track which thumbnails have loaded: a badge must wait for its
         // photo — it belongs to the image, not to the placeholder box.
         let loadedImages = appState.thumbWindow?.images ?? [:]
-        let flagVersion = flagged.sorted().joined(separator: ",") + "|\(currentIndex)"
+        let flagVersion = flags.map { "\($0.key):\($0.value.rawValue)" }.sorted().joined(separator: ",") + "|\(currentIndex)"
         let elements = files.enumerated().map { index, file in
             (key: stripKey(file, flagVersion: flagVersion),
              index: index,
              file: file,
-             isFlagged: flagged.contains(file.id),
+             flagColor: flags[file.id],
              hasImage: loadedImages[index] != nil)
         }
         ScrollViewReader { proxy in
@@ -53,7 +53,7 @@ struct FilmstripView: View {
                     // re-render a surviving cell with a stale range index and
                     // trap on files[index] (crash).
                     ForEach(elements, id: \.key) { element in
-                        ThumbnailCell(index: element.index, file: element.file, isFlagged: element.isFlagged)
+                        ThumbnailCell(index: element.index, file: element.file, flagColor: element.flagColor)
                     }
                 }
                 .padding(6)
@@ -68,7 +68,7 @@ struct FilmstripView: View {
                 guard let session = appState.session,
                       session.files.indices.contains(session.currentIndex) else { return }
                 let file = session.files[session.currentIndex]
-                let version = session.flagged.sorted().joined(separator: ",") + "|\(session.currentIndex)"
+                let version = session.flags.map { "\($0.key):\($0.value.rawValue)" }.sorted().joined(separator: ",") + "|\(session.currentIndex)"
                 let key = stripKey(file, flagVersion: version)
                 let now = Date()
                 let scrubbing = now.timeIntervalSince(lastScrollAt) < 0.15
@@ -89,14 +89,14 @@ struct FilmstripView: View {
 struct ThumbnailCell: View {
     let index: Int
     let file: SessionFile
-    let isFlagged: Bool
+    let flagColor: FlagColor?
     @Environment(AppState.self) private var appState
 
     var body: some View {
         VStack(spacing: 3) {
             BadgedThumbnailView(
                 image: appState.thumbWindow?.image(at: index),
-                isFlagged: isFlagged,
+                flagColor: flagColor,
                 size: CGSize(width: 100, height: 64),
                 badgeSize: 24
             )

@@ -537,10 +537,9 @@ private struct FlagBadgeOverlay: View {
 
     var body: some View {
         if let file {
-            let isFlagged = appState.session?.isFlagged(file) == true
-            // hasImage is true here: overlay exists only on the Image branch (display or thumb), never on ProgressView
-            if FlagBadgeLogic.shouldShow(isFlagged: isFlagged, hasImage: true) {
-                FlagBadge(size: 44)
+            let flagColor = appState.session?.flagColor(for: file)
+            if let c = flagColor, FlagBadgeLogic.shouldShow(isFlagged: true, hasImage: true) {
+                FlagBadge(color: c, size: 44)
             }
         }
     }

@@ -17,17 +17,17 @@ struct GridView: View {
         // unlike the strip's thumbWindow (radius 30) which unloads off-window cells.
         let files = appState.session?.files ?? []
         let gridSelection = appState.gridSelection
-        let flagged = appState.session?.flagged ?? Set<String>()
+        let flags = appState.session?.flags ?? [:]
         let thumbImages = appState.gridThumbs?.images ?? [:]
         if files.isEmpty {
             ZStack { Color.black; Text("No photos in this filter").foregroundStyle(.secondary) }
         } else {
             // Compute once per body evaluation; GridCell receives plain values, not @Environment reads.
-            let elements: [(index: Int, file: SessionFile, isSelected: Bool, isFlagged: Bool, image: CGImage?)] = files.enumerated().map { idx, file in
+            let elements: [(index: Int, file: SessionFile, isSelected: Bool, flagColor: FlagColor?, image: CGImage?)] = files.enumerated().map { idx, file in
                 (index: idx,
                  file: file,
                  isSelected: gridSelection.contains(file.id),
-                 isFlagged: flagged.contains(file.id),
+                 flagColor: flags[file.id],
                  image: thumbImages[idx])
             }
             ScrollView {
@@ -37,7 +37,7 @@ struct GridView: View {
                             index: element.index,
                             file: element.file,
                             isSelected: element.isSelected,
-                            isFlagged: element.isFlagged,
+                            flagColor: element.flagColor,
                             image: element.image
                         )
                         .task(id: element.index) { appState.gridThumbs?.ensureLoaded(indices: [element.index]) }
@@ -69,12 +69,12 @@ struct GridView: View {
 }
 
 private struct GridCell: View {
-    let index: Int; let file: SessionFile; let isSelected: Bool; let isFlagged: Bool; let image: CGImage?
+    let index: Int; let file: SessionFile; let isSelected: Bool; let flagColor: FlagColor?; let image: CGImage?
     var body: some View {
         VStack(spacing: 4) {
             BadgedThumbnailView(
                 image: image,
-                isFlagged: isFlagged,
+                flagColor: flagColor,
                 size: CGSize(width: 160, height: 108),
                 badgeSize: 24
             )

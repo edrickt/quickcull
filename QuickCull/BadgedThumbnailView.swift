@@ -7,7 +7,7 @@ import QuickCullCore
 /// `FlagBadgeLogic.shouldShow` directly for its single-commit optimization.
 struct BadgedThumbnailView: View {
     let image: CGImage?
-    let isFlagged: Bool
+    let flagColor: FlagColor?
     let size: CGSize
     let badgeSize: CGFloat
 
@@ -21,9 +21,8 @@ struct BadgedThumbnailView: View {
                             .resizable()
                             .scaledToFit()
                             .overlay(alignment: .topTrailing) {
-                                if FlagBadgeLogic.shouldShow(isFlagged: isFlagged, hasImage: true) {
-                                    FlagBadge(size: badgeSize)
-                                        .shadow(color: .black.opacity(0.35), radius: 1.5, y: 0.5)
+                                if let c = flagColor, FlagBadgeLogic.shouldShow(isFlagged: true, hasImage: true) {
+                                    FlagBadge(color: c, size: badgeSize)
                                 }
                             }
                     }
