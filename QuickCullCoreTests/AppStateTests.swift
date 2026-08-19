@@ -292,7 +292,7 @@ final class AppStateTests: XCTestCase {
         await waitForScrubbing(state)
 
         state.handle(.toggleFlag)          // flag f0
-        state.setFilter(.flagged)
+        state.setFilter(.red)
         XCTAssertEqual(state.session?.count, 1)
         XCTAssertEqual(state.thumbWindow?.count, 1)
         XCTAssertEqual(state.displayImages?.count, 1)
@@ -313,7 +313,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(state.thumbWindow === window,
                       "flag toggle in All mode must not rebuild windows")
 
-        state.setFilter(.flagged)          // [f0]
+        state.setFilter(.red)          // [f0]
         state.handle(.toggleFlag)          // unflag f0: projection empties -> reset to All
         XCTAssertEqual(state.session?.filter, .all)
         XCTAssertEqual(state.session?.count, 3)
@@ -469,8 +469,8 @@ final class AppStateTests: XCTestCase {
         state.setViewMode(.grid)
         state.selectSingle(id: ids[0])
         // No flags yet: Flagged filter yields empty placeholder, not fallback
-        state.setFilter(.flagged)
-        XCTAssertEqual(state.session?.filter, .flagged)
+        state.setFilter(.red)
+        XCTAssertEqual(state.session?.filter, .red)
         XCTAssertEqual(state.session?.count, 0)
         XCTAssertTrue(state.session?.isEmpty == true)
         XCTAssertEqual(state.thumbWindow?.count, 0)
@@ -509,7 +509,7 @@ final class AppStateTests: XCTestCase {
         await waitForScrubbing(state)
         // make non-empty state: flag, filter, grid selection, failures
         state.session?.toggleFlag() // flag current
-        state.setFilter(.flagged)
+        state.setFilter(.red)
         state.setViewMode(.grid)
         state.selectSingle(id: state.session!.files[0].id)
         state.requestCommit() // pendingCommitCount >0 but not committing

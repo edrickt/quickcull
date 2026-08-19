@@ -118,7 +118,7 @@ final class SessionTests: XCTestCase {
         session.toggleFlag()              // flag a
         session.move(by: 2)
         session.toggleFlag()              // flag c
-        session.setFilter(.flagged)
+        session.setFilter(.red)
         XCTAssertEqual(session.count, 2)
         XCTAssertEqual(session.files.map(\.url.lastPathComponent), ["a.cr2", "c.cr2"])
         XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")   // current kept
@@ -149,15 +149,15 @@ final class SessionTests: XCTestCase {
         session.setIndex(2)               // current = c again
         session.setFilter(.keepers)       // b is nearer than e
         XCTAssertEqual(session.currentFile.url.lastPathComponent, "b.cr2")
-        session.setFilter(.flagged)       // back to flagged: c, current by id
+        session.setFilter(.red)       // back to flagged: c, current by id
         XCTAssertEqual(session.count, 2)
         XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
     }
 
     func testFilterMatchingNothingShowsEmpty() {
         let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
-        session.setFilter(.flagged)       // nothing is flagged
-        XCTAssertEqual(session.filter, .flagged)
+        session.setFilter(.red)       // nothing is flagged
+        XCTAssertEqual(session.filter, .red)
         XCTAssertEqual(session.count, 0)
         XCTAssertTrue(session.isEmpty)
         XCTAssertEqual(session.currentIndex, 0)
@@ -167,12 +167,12 @@ final class SessionTests: XCTestCase {
         let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2", "e.cr2"]))
         session.setIndex(2)               // current = c
         session.toggleFlag()              // flag c
-        session.setFilter(.flagged)       // [c], current = c
+        session.setFilter(.red)       // [c], current = c
         session.toggleFlag()              // unflag c: projection empties -> All, current = c
         XCTAssertEqual(session.filter, .all)
         XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
-        session.setFilter(.flagged)       // still nothing flagged: empty placeholder
-        XCTAssertEqual(session.filter, .flagged)
+        session.setFilter(.red)       // still nothing flagged: empty placeholder
+        XCTAssertEqual(session.filter, .red)
         XCTAssertEqual(session.count, 0)
         XCTAssertTrue(session.isEmpty)
     }
@@ -184,7 +184,7 @@ final class SessionTests: XCTestCase {
         session.toggleFlag()              // flag a
         session.move(by: 1)
         session.toggleFlag()              // flag b
-        session.setFilter(.flagged)       // [a, b], current = b
+        session.setFilter(.red)       // [a, b], current = b
         session.toggleFlag()              // unflag b: drops out, a takes over
         XCTAssertEqual(session.count, 1)
         XCTAssertEqual(session.files.map(\.url.lastPathComponent), ["a.cr2"])
@@ -205,7 +205,7 @@ final class SessionTests: XCTestCase {
     func testUnflaggingLastVisibleResetsToAll() {
         let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2"]))
         session.toggleFlag()              // flag a
-        session.setFilter(.flagged)       // [a]
+        session.setFilter(.red)       // [a]
         session.toggleFlag()              // unflag a: projection empties
         XCTAssertEqual(session.filter, .all)
         XCTAssertEqual(session.count, 2)
@@ -231,7 +231,7 @@ final class SessionTests: XCTestCase {
         session.toggleFlag()              // flag a
         session.move(by: 1)
         session.toggleFlag()              // flag b
-        session.setFilter(.flagged)       // [a, b], current = b
+        session.setFilter(.red)       // [a, b], current = b
         session.remove([all[0], all[1]])  // commit trashes both flagged
         XCTAssertEqual(session.filter, .all)
         XCTAssertEqual(session.count, 1)

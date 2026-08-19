@@ -10,12 +10,27 @@ import Observation
 public final class Session {
     public private(set) var files: [SessionFile]
     public private(set) var currentIndex: Int = 0
-    public private(set) var flagged: Set<String> = []
+    public private(set) var flags: [String: FlagColor] = [:]
+    public var flagged: Set<String> { Set(flags.keys) }
+    public func flagColor(for file: SessionFile) -> FlagColor? { flags[file.id] }
+    public func flagColor(for id: String) -> FlagColor? { flags[id] }
+    public func flaggedCount(_ color: FlagColor? = nil) -> Int {
+        if let c = color { return flags.values.filter { $0 == c }.count }
+        else { return flags.count }
+    }
+    public var flaggedCount: Int { flags.count }
+    public func flaggedFiles(_ color: FlagColor? = nil) -> [SessionFile] {
+        if let c = color { return allFiles.filter { flags[$0.id] == c } }
+        else { return allFiles.filter { flags[$0.id] != nil } }
+    }
+    public var flaggedFiles: [SessionFile] { flaggedFiles(nil) }
+    public func isFlagged(_ file: SessionFile) -> Bool { flags[file.id] != nil }
+    public func isFlagged(_ file: SessionFile, color: FlagColor) -> Bool { flags[file.id] == color }
     public private(set) var filter: CullFilter = .all
 
     /// The full post-commit file list; `files` is its projection under
     /// `filter`. Nothing outside Session touches this.
-    private var allFiles: [SessionFile]
+    public private(set) var allFiles: [SessionFile]
 
     public init(files: [SessionFile]) {
         precondition(!files.isEmpty, "Session requires at least one file")
@@ -51,8 +66,10 @@ public final class Session {
     private func matches(_ file: SessionFile, _ filter: CullFilter) -> Bool {
         switch filter {
         case .all: return true
-        case .flagged: return flagged.contains(file.id)
-        case .keepers: return !flagged.contains(file.id)
+        case .red: return flags[file.id] == .red
+        case .yellow: return flags[file.id] == .yellow
+        case .green: return flags[file.id] == .green
+        case .keepers: return flags[file.id] == nil
         }
     }
 
@@ -120,10 +137,10 @@ public final class Session {
     /// Returns whether the visible sequence changed (always false in All
     /// mode).
     @discardableResult
-    public func toggleFlag() -> Bool {
+    public func toggleFlag(color: FlagColor) -> Bool {
         guard !files.isEmpty else { return false }
         let id = currentFile.id
-        if flagged.contains(id) { flagged.remove(id) } else { flagged.insert(id) }
+        if flags[id] == color { flags.removeValue(forKey: id) } else { flags[id] = color }
         guard filter != .all else { return false }
         let newFiles = projection(for: filter)
         if newFiles.isEmpty {
@@ -137,6 +154,9 @@ public final class Session {
         return true
     }
 
+    @discardableResult
+    public func toggleFlag() -> Bool { toggleFlag(color: .red) }
+
     /// Batch-toggles flags for the given ids (intersection with `allFiles`).
     /// Recomputes the projection once. If the current photo is still visible
     /// it stays current; otherwise the nearest match in full-list order takes
@@ -144,7 +164,7 @@ public final class Session {
     /// the previous current photo by id. Returns whether the projection
     /// size changed or the filter fell back.
     @discardableResult
-    public func toggleFlags(ids: Set<String>) -> Bool {
+    public func toggleFlags(ids: Set<String>, color: FlagColor) -> Bool {
         guard !allFiles.isEmpty, !ids.isEmpty else { return false }
         let validIDs = ids.intersection(allFiles.map(\.id))
         guard !validIDs.isEmpty else { return false }
@@ -152,7 +172,7 @@ public final class Session {
         let beforeFilter = filter
         let currentIDBefore = files.isEmpty ? nil : currentFile.id
         for id in validIDs {
-            if flagged.contains(id) { flagged.remove(id) } else { flagged.insert(id) }
+            if flags[id] == color { flags.removeValue(forKey: id) } else { flags[id] = color }
         }
         let newFiles = projection(for: filter)
         if newFiles.isEmpty {
@@ -176,20 +196,11 @@ public final class Session {
         return files.count != beforeCount || filter != beforeFilter
     }
 
-    public func isFlagged(_ file: SessionFile) -> Bool {
-        flagged.contains(file.id)
-    }
+    @discardableResult
+    public func toggleFlags(ids: Set<String>) -> Bool { toggleFlags(ids: ids, color: .red) }
 
     public func contains(id: String) -> Bool {
         allFiles.contains { $0.id == id }
-    }
-
-    public var flaggedCount: Int { flagged.count }
-
-    /// Flagged files from the FULL session list: under the Keepers filter
-    /// the flagged files are not visible, and commit must still find them.
-    public var flaggedFiles: [SessionFile] {
-        allFiles.filter { flagged.contains($0.id) }
     }
 
     /// Remove trashed files after a successful commit. All flags are cleared
@@ -212,7 +223,7 @@ public final class Session {
         } else {
             currentPos = 0
         }
-        flagged.subtract(ids)
+        for id in ids { flags.removeValue(forKey: id) }
         allFiles.removeAll { ids.contains($0.id) }
         files = projection(for: filter)
         guard !files.isEmpty else {
