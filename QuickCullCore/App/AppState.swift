@@ -24,6 +24,11 @@ public final class AppState {
     public private(set) var commitFailures: [TrashOutcome] = []
     public private(set) var pendingCommitCount: Int = 0
     public private(set) var isCommitting: Bool = false
+    public private(set) var pendingMoveCount: Int = 0
+    public private(set) var pendingMoveDestination: URL?
+    public internal(set) var moveFailures: [MoveOutcome] = []
+    public private(set) var isMoving: Bool = false
+    private let mover: Moving
 
     public private(set) var thumbWindow: ImageWindow?
     public private(set) var gridThumbs: ImageWindow?
@@ -36,10 +41,12 @@ public final class AppState {
     public init(decoder: RawDecoding = RoutingDecoder(librawDecoder: LibRawDecoder(),
                                                       imageIODecoder: ImageIODecoder()),
                 cache: ImageCacheStore = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()),
-                trasher: Trashing = FileManagerTrasher()) {
+                trasher: Trashing = FileManagerTrasher(),
+                mover: Moving = FileManagerMover()) {
         self.decoder = decoder
         self.cache = cache
         self.trasher = trasher
+        self.mover = mover
     }
 
     /// Launch-time authoritative cache cleanup (leftovers from crashes
@@ -61,6 +68,10 @@ public final class AppState {
         commitFailures = []
         pendingCommitCount = 0
         isCommitting = false
+        pendingMoveCount = 0
+        pendingMoveDestination = nil
+        moveFailures = []
+        isMoving = false
         gridSelection = []
         gridAnchorID = nil
         viewMode = .scrub
@@ -81,6 +92,10 @@ public final class AppState {
                 DecodeOutcome(file: SessionFile(url: $0),
                               error: .cannotOpen("Unsupported format"))
             }
+            pendingMoveCount = 0
+            pendingMoveDestination = nil
+            moveFailures = []
+            isMoving = false
             phase = .empty
             return
         }
@@ -96,6 +111,10 @@ public final class AppState {
         importFailures = []
         commitFailures = []
         pendingCommitCount = 0
+        pendingMoveCount = 0
+        pendingMoveDestination = nil
+        moveFailures = []
+        isMoving = false
         phase = .decoding(completed: 0, total: files.count)
 
         let engine = DecodeEngine(decoder: decoder, cache: cache)
@@ -159,7 +178,7 @@ public final class AppState {
     }
 
     public func handle(_ action: CullAction) {
-        guard let session, phase == .scrubbing else { return }
+        guard let session, phase == .scrubbing, !isMoving, !isCommitting else { return }
         switch action {
         case .next: session.move(by: 1)
         case .previous: session.move(by: -1)
@@ -206,7 +225,7 @@ public final class AppState {
     }
 
     public func setViewMode(_ mode: ViewMode) {
-        guard !isCommitting else { return }
+        guard !isCommitting, !isMoving else { return }
         guard phase == .scrubbing else { return }
         guard viewMode != mode else { return }
         viewMode = mode
@@ -303,5 +322,40 @@ public final class AppState {
 
     public func cancelCommit() {
         pendingCommitCount = 0
+    }
+
+    public func requestMove(to dest: URL) {
+        pendingMoveCount = session?.flaggedCount ?? 0
+        pendingMoveDestination = dest
+    }
+    public func cancelMove() {
+        pendingMoveCount = 0
+        pendingMoveDestination = nil
+    }
+    public func confirmMove() async {
+        guard let session, !isCommitting, !isMoving, let dest = pendingMoveDestination else { return }
+        let flagged = session.flaggedFiles
+        guard !flagged.isEmpty else { pendingMoveCount = 0; pendingMoveDestination = nil; return }
+        isMoving = true
+        let outcomes = await Task.detached(priority: .userInitiated) {
+            MoveCommit(mover: self.mover).commit(files: flagged, to: dest)
+        }.value
+        let succeeded = outcomes.filter(\.succeeded).map(\.file)
+        session.remove(succeeded)
+        gridSelection = gridSelection.filter { session.contains(id: $0) }
+        moveFailures = outcomes.filter { !$0.succeeded }
+        pendingMoveCount = 0
+        pendingMoveDestination = nil
+        isMoving = false
+        if session.isEmpty {
+            self.session = nil
+            thumbWindow = nil
+            gridThumbs = nil
+            displayImages = nil
+            phase = .empty
+            viewMode = .scrub
+        } else {
+            installWindows(for: session.files)
+        }
     }
 }
