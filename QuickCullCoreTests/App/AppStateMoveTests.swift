@@ -35,7 +35,7 @@ final class AppStateMoveTests: XCTestCase {
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let s = makeState()
         s.importFiles(urls: [a]); await waitForScrubbing(s)
-        s.handle(.toggleFlag)
+        s.handle(.toggleFlag(.red))
         let dest = URL(fileURLWithPath: "/tmp/dest")
         s.requestMove(to: dest)
         XCTAssertEqual(s.pendingMoveCount, 1)
@@ -51,7 +51,7 @@ final class AppStateMoveTests: XCTestCase {
         let mover = StubMover(); mover.failIDs = [a.path]
         let s = makeState(mover: mover)
         s.importFiles(urls: [a,b]); await waitForScrubbing(s)
-        s.handle(.toggleFlag); s.handle(.next); s.handle(.toggleFlag)
+        s.handle(.toggleFlag(.red)); s.handle(.next); s.handle(.toggleFlag(.red))
         let dest = URL(fileURLWithPath: "/tmp/dest2")
         s.requestMove(to: dest)
         await s.confirmMove()
@@ -67,7 +67,7 @@ final class AppStateMoveTests: XCTestCase {
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let s = makeState()
         s.importFiles(urls: [a]); await waitForScrubbing(s)
-        s.handle(.toggleFlag)
+        s.handle(.toggleFlag(.red))
         s.requestMove(to: URL(fileURLWithPath: "/tmp/dest3"))
         await s.confirmMove()
         XCTAssertNil(s.session)
@@ -82,7 +82,7 @@ final class AppStateMoveTests: XCTestCase {
         mover.gate = gate
         let s = makeState(mover: mover)
         s.importFiles(urls: [a]); await waitForScrubbing(s)
-        s.handle(.toggleFlag)
+        s.handle(.toggleFlag(.red))
         s.requestMove(to: URL(fileURLWithPath: "/tmp/dest4"))
         let task = Task { await s.confirmMove() }
         var observed = false
@@ -100,7 +100,7 @@ final class AppStateMoveTests: XCTestCase {
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let s = makeState()
         s.importFiles(urls: [a]); await waitForScrubbing(s)
-        s.handle(.toggleFlag)
+        s.handle(.toggleFlag(.red))
         s.requestMove(to: URL(fileURLWithPath: "/tmp/d"))
         s.moveFailures = [MoveOutcome(file: SessionFile(url: a), error: NSError(domain: "t", code: 1))]
         s.startNewSession()
@@ -130,7 +130,7 @@ final class AppStateMoveTests: XCTestCase {
         mover.gate = gate
         let s = makeState(mover: mover)
         s.importFiles(urls: [a,b]); await waitForScrubbing(s)
-        s.handle(.toggleFlag)
+        s.handle(.toggleFlag(.red))
         s.requestMove(to: URL(fileURLWithPath: "/tmp/d5"))
         let task = Task { await s.confirmMove() }
         // wait until isMoving

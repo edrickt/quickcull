@@ -185,9 +185,9 @@ public final class AppState {
         case .previous: session.move(by: -1)
         case .jumpForward: session.move(by: 10)
         case .jumpBack: session.move(by: -10)
-        case .toggleFlag:
+        case .toggleFlag(let color):
             if viewMode == .grid && !gridSelection.isEmpty {
-                let changed = session.toggleFlags(ids: gridSelection)
+                let changed = session.toggleFlags(ids: gridSelection, color: color)
                 if changed { installWindows(for: session.files) } else { syncWindows() }
                 // Deselect after any flag action: Ctrl+A + Z should not stay highlighted
                 gridSelection = []
@@ -198,7 +198,7 @@ public final class AppState {
                 // All), so the windows must be rebuilt over the new
                 // projection. In All mode the sequence is unchanged and the
                 // windows stay put.
-                if session.toggleFlag() {
+                if session.toggleFlag(color: color) {
                     installWindows(for: session.files)
                 } else {
                     syncWindows()

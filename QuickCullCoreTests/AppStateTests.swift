@@ -52,7 +52,7 @@ final class AppStateTests: XCTestCase {
         let state = makeState()
         state.importFiles(urls: [a])
         await waitForScrubbing(state)
-        state.handle(.toggleFlag)
+        state.handle(.toggleFlag(.red))
         XCTAssertEqual(state.session?.flaggedCount, 1)
         state.importFiles(urls: [b])
         await waitForScrubbing(state)
@@ -71,7 +71,7 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.session?.currentIndex, 2)
         state.handle(.jumpBack)
         XCTAssertEqual(state.session?.currentIndex, 0)
-        state.handle(.toggleFlag)
+        state.handle(.toggleFlag(.red))
         XCTAssertEqual(state.session?.flaggedCount, 1)
     }
 
@@ -84,9 +84,9 @@ final class AppStateTests: XCTestCase {
         state.importFiles(urls: [a, b, c])
         await waitForScrubbing(state)
 
-        state.handle(.toggleFlag)   // flag a
+        state.handle(.toggleFlag(.red))   // flag a
         state.handle(.next)
-        state.handle(.toggleFlag)   // flag b
+        state.handle(.toggleFlag(.red))   // flag b
         state.requestCommit()
         XCTAssertEqual(state.pendingCommitCount, 2)
         await state.confirmCommit()
@@ -106,9 +106,9 @@ final class AppStateTests: XCTestCase {
         state.importFiles(urls: [a, b])
         await waitForScrubbing(state)
 
-        state.handle(.toggleFlag)   // flag a
+        state.handle(.toggleFlag(.red))   // flag a
         state.handle(.next)
-        state.handle(.toggleFlag)   // flag b
+        state.handle(.toggleFlag(.red))   // flag b
         state.requestCommit()
         await state.confirmCommit()
         XCTAssertEqual(state.session?.count, 1)        // a stays
@@ -122,7 +122,7 @@ final class AppStateTests: XCTestCase {
         state.importFiles(urls: [a])
         await waitForScrubbing(state)
 
-        state.handle(.toggleFlag)
+        state.handle(.toggleFlag(.red))
         state.requestCommit()
         await state.confirmCommit()
         XCTAssertNil(state.session)
@@ -139,7 +139,7 @@ final class AppStateTests: XCTestCase {
         state.importFiles(urls: [a, b])
         await waitForScrubbing(state)
 
-        state.handle(.toggleFlag)
+        state.handle(.toggleFlag(.red))
         state.requestCommit()
         XCTAssertFalse(state.isCommitting)
 
@@ -291,7 +291,7 @@ final class AppStateTests: XCTestCase {
         state.importFiles(urls: files)
         await waitForScrubbing(state)
 
-        state.handle(.toggleFlag)          // flag f0
+        state.handle(.toggleFlag(.red))          // flag f0
         state.setFilter(.red)
         XCTAssertEqual(state.session?.count, 1)
         XCTAssertEqual(state.thumbWindow?.count, 1)
@@ -309,12 +309,12 @@ final class AppStateTests: XCTestCase {
         await waitForScrubbing(state)
 
         let window = state.thumbWindow
-        state.handle(.toggleFlag)          // All mode: sequence unchanged
+        state.handle(.toggleFlag(.red))          // All mode: sequence unchanged
         XCTAssertTrue(state.thumbWindow === window,
                       "flag toggle in All mode must not rebuild windows")
 
         state.setFilter(.red)          // [f0]
-        state.handle(.toggleFlag)          // unflag f0: projection empties -> reset to All
+        state.handle(.toggleFlag(.red))          // unflag f0: projection empties -> reset to All
         XCTAssertEqual(state.session?.filter, .all)
         XCTAssertEqual(state.session?.count, 3)
         XCTAssertNotNil(state.thumbWindow)
@@ -327,7 +327,7 @@ final class AppStateTests: XCTestCase {
         let state = makeState(trasher: trasher)
         state.importFiles(urls: [a, b])
         await waitForScrubbing(state)
-        state.handle(.toggleFlag)          // flag a
+        state.handle(.toggleFlag(.red))          // flag a
         state.setFilter(.keepers)          // [b], current = b
         state.requestCommit()
         XCTAssertEqual(state.pendingCommitCount, 1)
@@ -354,7 +354,7 @@ final class AppStateTests: XCTestCase {
 
         for _ in 0..<8 {
             state.handle(.next)
-            state.handle(.toggleFlag)
+            state.handle(.toggleFlag(.red))
         }
         // Pair i flags the photo current after pair i's next. The last next
         // clamps at the end, so pair 8's toggle lands on f7 again and flips
@@ -423,7 +423,7 @@ final class AppStateTests: XCTestCase {
         let ids = state.session!.files.map(\.id)
         state.selectSingle(id: ids[0])
         state.toggleSelection(id: ids[2])
-        state.handle(.toggleFlag) // should batch-flag 0 and 2
+        state.handle(.toggleFlag(.red)) // should batch-flag 0 and 2
         XCTAssertEqual(state.session?.flaggedCount, 2)
         XCTAssertTrue(state.session!.isFlagged(state.session!.files[0]))
         XCTAssertTrue(state.gridSelection.isEmpty, "grid should deselect after any flag action (Ctrl+A + Z should not stay highlighted)")
@@ -436,7 +436,7 @@ final class AppStateTests: XCTestCase {
         await waitForScrubbing(state)
         state.setViewMode(.grid)
         XCTAssertTrue(state.gridSelection.isEmpty)
-        state.handle(.toggleFlag) // no selection → flags current (index 0)
+        state.handle(.toggleFlag(.red)) // no selection → flags current (index 0)
         XCTAssertEqual(state.session?.flaggedCount, 1)
     }
 
@@ -449,7 +449,7 @@ final class AppStateTests: XCTestCase {
         state.setViewMode(.grid)
         state.selectSingle(id: ids[0])
         state.toggleSelection(id: ids[1])
-        state.handle(.toggleFlag) // flag 0,1 -> deselects after flag
+        state.handle(.toggleFlag(.red)) // flag 0,1 -> deselects after flag
         XCTAssertTrue(state.gridSelection.isEmpty, "deselect after flag")
         state.setFilter(.keepers) // grid now shows only [2]
         XCTAssertTrue(state.gridSelection.isEmpty)
@@ -491,7 +491,7 @@ final class AppStateTests: XCTestCase {
         state.setViewMode(.grid)
         XCTAssertEqual(state.viewMode, .grid)
         // Empty selection in grid falls back to single-flag current
-        state.handle(.toggleFlag)
+        state.handle(.toggleFlag(.red))
         XCTAssertEqual(state.session?.flaggedCount, 1)
         state.requestCommit()
         await state.confirmCommit()

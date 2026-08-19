@@ -10,7 +10,7 @@ final class CullKeyMapTests: XCTestCase {
     }
 
     func testZKey() {
-        XCTAssertEqual(CullKeyMap.action(forKeyCode: 6), .toggleFlag)  // 'z' physical key
+        XCTAssertEqual(CullKeyMap.action(forKeyCode: 6), .toggleFlag(.red))  // 'z' physical key
     }
 
     func testUnknownKeysAreIgnored() {

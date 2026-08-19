@@ -1,14 +1,12 @@
 import SwiftUI
+import QuickCullCore
 
-/// Red reject-flag triangle pinned to the upper-right corner of an image.
-/// A solid right triangle anchored at the corner (classic culling reject
-/// marker), with a subtle shadow so it reads on bright images.
 struct FlagBadge: View {
+    var color: FlagColor
     var size: CGFloat = 32
 
     var body: some View {
-        CornerTriangle()
-            .fill(.red)
+        CornerTriangle().fill(color.uiColor)
             .frame(width: size, height: size)
             .shadow(color: .black.opacity(0.35), radius: 1.5, y: 0.5)
     }
