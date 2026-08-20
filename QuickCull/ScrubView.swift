@@ -24,6 +24,7 @@ struct ScrubView: View {
             if !appState.importFailures.isEmpty {
                 importFailuresBanner
             }
+            controlBar
             if appState.viewMode == .grid {
                 GridView()
             } else {
@@ -44,31 +45,6 @@ struct ScrubView: View {
                     .fontWeight(.light)
                     .help(hudVisible ? "Hide metadata" : "Show metadata")
                     .disabled(appState.isCommitting || appState.isMoving)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Picker("View", selection: Binding(
-                    get: { appState.viewMode },
-                    set: { appState.setViewMode($0) }
-                )) {
-                    Text("Single").tag(AppState.ViewMode.scrub)
-                    Text("Split").tag(AppState.ViewMode.split)
-                    Text("Grid").tag(AppState.ViewMode.grid)
-                }.pickerStyle(.segmented).fontWeight(.light).disabled(appState.isCommitting || appState.isMoving)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Picker("Filter", selection: Binding(
-                    get: { appState.session?.filter ?? .all },
-                    set: { appState.setFilter($0) }
-                )) {
-                    Text("All").tag(CullFilter.all)
-                    Text("R (\(appState.session?.flaggedCount(.red) ?? 0))").tag(CullFilter.red)
-                    Text("Y (\(appState.session?.flaggedCount(.yellow) ?? 0))").tag(CullFilter.yellow)
-                    Text("G (\(appState.session?.flaggedCount(.green) ?? 0))").tag(CullFilter.green)
-                    Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount() } ?? 0))").tag(CullFilter.keepers)
-                }
-                .pickerStyle(.segmented)
-                .fontWeight(.light)
-                .disabled(appState.isCommitting || appState.isMoving)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button("New Session") { showNewSessionConfirm = true }
@@ -202,8 +178,45 @@ struct ScrubView: View {
         return false
     }
 
-    /// Import failures are set before the decoding → scrubbing transition,
-    /// so they appear here (DecodingView can never render them).
+    /// View-mode and filter segmented pickers, formerly toolbar items.
+    /// They live here (not in the window toolbar) so the toolbar stays
+    /// narrow enough to never overflow into the chevron: on macOS 26 a
+    /// SwiftUI toolbar item crossing the overflow threshold during a
+    /// resize trips an AppKit constraint-pass guard
+    /// ("Update Constraints in Window pass" > view count) and crashes
+    /// the app (EXC_BREAKPOINT in _postWindowNeedsUpdateConstraints).
+    private var controlBar: some View {
+        HStack(spacing: 12) {
+            Picker("View", selection: Binding(
+                get: { appState.viewMode },
+                set: { appState.setViewMode($0) }
+            )) {
+                Text("Single").tag(AppState.ViewMode.scrub)
+                Text("Split").tag(AppState.ViewMode.split)
+                Text("Grid").tag(AppState.ViewMode.grid)
+            }
+            .pickerStyle(.segmented)
+            .fontWeight(.light)
+            .disabled(appState.isCommitting || appState.isMoving)
+            Picker("Filter", selection: Binding(
+                get: { appState.session?.filter ?? .all },
+                set: { appState.setFilter($0) }
+            )) {
+                Text("All").tag(CullFilter.all)
+                Text("R (\(appState.session?.flaggedCount(.red) ?? 0))").tag(CullFilter.red)
+                Text("Y (\(appState.session?.flaggedCount(.yellow) ?? 0))").tag(CullFilter.yellow)
+                Text("G (\(appState.session?.flaggedCount(.green) ?? 0))").tag(CullFilter.green)
+                Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount() } ?? 0))").tag(CullFilter.keepers)
+            }
+            .pickerStyle(.segmented)
+            .fontWeight(.light)
+            .disabled(appState.isCommitting || appState.isMoving)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
     private var importFailuresBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
