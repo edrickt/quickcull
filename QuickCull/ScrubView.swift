@@ -35,79 +35,15 @@ struct ScrubView: View {
                     zoomLastOffset: $zoomLastOffset,
                     hudVisible: $hudVisible
                 )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
                 FilmstripView()
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
-                    .fontWeight(.light)
-                    .help(hudVisible ? "Hide metadata" : "Show metadata")
-                    .disabled(appState.isCommitting || appState.isMoving)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button("New Session") { showNewSessionConfirm = true }
-                    .fontWeight(.light)
-                    .disabled(appState.isCommitting || appState.isMoving)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Trash R (\(appState.session?.flaggedCount(.red) ?? 0))", role: .destructive) {
-                        appState.requestCommit(color: .red); showCommitConfirm = true
-                    }.disabled((appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Trash Y (\(appState.session?.flaggedCount(.yellow) ?? 0))", role: .destructive) {
-                        appState.requestCommit(color: .yellow); showCommitConfirm = true
-                    }.disabled((appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Trash G (\(appState.session?.flaggedCount(.green) ?? 0))", role: .destructive) {
-                        appState.requestCommit(color: .green); showCommitConfirm = true
-                    }.disabled((appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Trash All Flagged (\(appState.session?.flaggedCount() ?? 0))", role: .destructive) {
-                        appState.requestCommit(color: nil); showCommitConfirm = true
-                    }.disabled((appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                } label: {
-                    if appState.isCommitting {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Move Flagged to Trash", systemImage: "trash")
-                    }
-                }
-                .fontWeight(.light)
-                .disabled(appState.isCommitting || appState.isMoving)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Move R (\(appState.session?.flaggedCount(.red) ?? 0))") {
-                        if let dest = chooseMoveDestination() {
-                            appState.requestMove(to: dest, color: .red); showMoveConfirm = true
-                        }
-                    }.disabled((appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Move Y (\(appState.session?.flaggedCount(.yellow) ?? 0))") {
-                        if let dest = chooseMoveDestination() {
-                            appState.requestMove(to: dest, color: .yellow); showMoveConfirm = true
-                        }
-                    }.disabled((appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Move G (\(appState.session?.flaggedCount(.green) ?? 0))") {
-                        if let dest = chooseMoveDestination() {
-                            appState.requestMove(to: dest, color: .green); showMoveConfirm = true
-                        }
-                    }.disabled((appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                    Button("Move All Flagged (\(appState.session?.flaggedCount() ?? 0))") {
-                        if let dest = chooseMoveDestination() {
-                            appState.requestMove(to: dest, color: nil); showMoveConfirm = true
-                        }
-                    }.disabled((appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving)
-                } label: {
-                    if appState.isMoving {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Move Flagged", systemImage: "folder")
-                    }
-                }
-                .fontWeight(.light)
-                .disabled(appState.isCommitting || appState.isMoving)
-            }
-        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        // File ▸ New Session (menu bar) routes here via the focused value,
+        // presenting the confirmation in this window.
+        .focusedSceneValue(\.newSessionAction) { showNewSessionConfirm = true }
         .alert("Move \(appState.pendingCommitCount) \(appState.pendingCommitColor?.displayName ?? "flagged") file(s) to Trash?",
                isPresented: $showCommitConfirm) {
             Button("Move to Trash", role: .destructive) {
@@ -178,43 +114,159 @@ struct ScrubView: View {
         return false
     }
 
-    /// View-mode and filter segmented pickers, formerly toolbar items.
+    /// View-mode/filter segmented pickers and all action buttons
+    /// (metadata toggle, trash, move; New Session lives in the menu bar's
+    /// File menu).
     /// They live here (not in the window toolbar) so the toolbar stays
     /// narrow enough to never overflow into the chevron: on macOS 26 a
     /// SwiftUI toolbar item crossing the overflow threshold during a
     /// resize trips an AppKit constraint-pass guard
     /// ("Update Constraints in Window pass" > view count) and crashes
     /// the app (EXC_BREAKPOINT in _postWindowNeedsUpdateConstraints).
+    ///
+    /// Width strategy: `ViewThatFits` shows the one-row bar when it fits,
+    /// otherwise the two-row fallback. This matters because segmented
+    /// pickers refuse to compress: in a single-row bar at a narrow window,
+    /// SwiftUI would crush the text buttons into unreadable slivers and
+    /// clip the last one off-window. The two-row bar (pickers on top,
+    /// actions below) keeps every control at its natural size down to the
+    /// window's minimum width (900pt).
+    ///
+    /// Each candidate fixes its own height (40pt one row, 72pt two rows)
+    /// with the padding inside: without a fixed height the bar is
+    /// vertically flexible, so the enclosing VStack stretches it and the
+    /// controls float with empty space above and below.
     private var controlBar: some View {
-        HStack(spacing: 12) {
-            Picker("View", selection: Binding(
-                get: { appState.viewMode },
-                set: { appState.setViewMode($0) }
-            )) {
-                Text("Single").tag(AppState.ViewMode.scrub)
-                Text("Split").tag(AppState.ViewMode.split)
-                Text("Grid").tag(AppState.ViewMode.grid)
-            }
-            .pickerStyle(.segmented)
-            .fontWeight(.light)
-            .disabled(appState.isCommitting || appState.isMoving)
-            Picker("Filter", selection: Binding(
-                get: { appState.session?.filter ?? .all },
-                set: { appState.setFilter($0) }
-            )) {
-                Text("All").tag(CullFilter.all)
-                Text("R (\(appState.session?.flaggedCount(.red) ?? 0))").tag(CullFilter.red)
-                Text("Y (\(appState.session?.flaggedCount(.yellow) ?? 0))").tag(CullFilter.yellow)
-                Text("G (\(appState.session?.flaggedCount(.green) ?? 0))").tag(CullFilter.green)
-                Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount() } ?? 0))").tag(CullFilter.keepers)
-            }
-            .pickerStyle(.segmented)
-            .fontWeight(.light)
-            .disabled(appState.isCommitting || appState.isMoving)
-            Spacer()
+        ViewThatFits(in: .horizontal) {
+            singleRowBar
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(height: 40)
+            twoRowBar
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(height: 72)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+    }
+
+    private var singleRowBar: some View {
+        HStack(spacing: 12) {
+            viewModePicker
+            filterPicker
+            Spacer()
+            actionButtons
+        }
+    }
+
+    private var twoRowBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                viewModePicker
+                filterPicker
+                Spacer()
+            }
+            // Actions anchored left, aligned under the pickers above.
+            HStack(spacing: 12) {
+                actionButtons
+                Spacer()
+            }
+        }
+    }
+
+    private var viewModePicker: some View {
+        Picker("View", selection: Binding(
+            get: { appState.viewMode },
+            set: { appState.setViewMode($0) }
+        )) {
+            Text("Single").tag(AppState.ViewMode.scrub)
+            Text("Split").tag(AppState.ViewMode.split)
+            Text("Grid").tag(AppState.ViewMode.grid)
+        }
+        .pickerStyle(.segmented)
+        .fontWeight(.light)
+        .disabled(appState.isCommitting || appState.isMoving)
+    }
+
+    private var filterPicker: some View {
+        Picker("Filter", selection: Binding(
+            get: { appState.session?.filter ?? .all },
+            set: { appState.setFilter($0) }
+        )) {
+            Text("All").tag(CullFilter.all)
+            Text("R (\(appState.session?.flaggedCount(.red) ?? 0))").tag(CullFilter.red)
+            Text("Y (\(appState.session?.flaggedCount(.yellow) ?? 0))").tag(CullFilter.yellow)
+            Text("G (\(appState.session?.flaggedCount(.green) ?? 0))").tag(CullFilter.green)
+            Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount() } ?? 0))").tag(CullFilter.keepers)
+        }
+        .pickerStyle(.segmented)
+        .fontWeight(.light)
+        .disabled(appState.isCommitting || appState.isMoving)
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
+            .fontWeight(.light)
+            .help(hudVisible ? "Hide metadata" : "Show metadata")
+            .disabled(appState.isCommitting || appState.isMoving)
+        DropdownMenu(items: [
+            .init("Trash R (\(appState.session?.flaggedCount(.red) ?? 0))", destructive: true,
+                  disabled: (appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+                appState.requestCommit(color: .red); showCommitConfirm = true
+            },
+            .init("Trash Y (\(appState.session?.flaggedCount(.yellow) ?? 0))", destructive: true,
+                  disabled: (appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+                appState.requestCommit(color: .yellow); showCommitConfirm = true
+            },
+            .init("Trash G (\(appState.session?.flaggedCount(.green) ?? 0))", destructive: true,
+                  disabled: (appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+                appState.requestCommit(color: .green); showCommitConfirm = true
+            },
+            .init("Trash All Flagged (\(appState.session?.flaggedCount() ?? 0))", destructive: true,
+                  disabled: (appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+                appState.requestCommit(color: nil); showCommitConfirm = true
+            },
+        ]) {
+            if appState.isCommitting {
+                ProgressView().controlSize(.small)
+            } else {
+                Label("Move Flagged to Trash", systemImage: "trash").fontWeight(.light)
+            }
+        }
+        .disabled(appState.isCommitting || appState.isMoving)
+        DropdownMenu(items: [
+            .init("Move R (\(appState.session?.flaggedCount(.red) ?? 0))",
+                  disabled: (appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+                if let dest = chooseMoveDestination() {
+                    appState.requestMove(to: dest, color: .red); showMoveConfirm = true
+                }
+            },
+            .init("Move Y (\(appState.session?.flaggedCount(.yellow) ?? 0))",
+                  disabled: (appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+                if let dest = chooseMoveDestination() {
+                    appState.requestMove(to: dest, color: .yellow); showMoveConfirm = true
+                }
+            },
+            .init("Move G (\(appState.session?.flaggedCount(.green) ?? 0))",
+                  disabled: (appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+                if let dest = chooseMoveDestination() {
+                    appState.requestMove(to: dest, color: .green); showMoveConfirm = true
+                }
+            },
+            .init("Move All Flagged (\(appState.session?.flaggedCount() ?? 0))",
+                  disabled: (appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+                if let dest = chooseMoveDestination() {
+                    appState.requestMove(to: dest, color: nil); showMoveConfirm = true
+                }
+            },
+        ]) {
+            if appState.isMoving {
+                ProgressView().controlSize(.small)
+            } else {
+                Label("Move Flagged", systemImage: "folder").fontWeight(.light)
+            }
+        }
+        .disabled(appState.isCommitting || appState.isMoving)
     }
 
     private var importFailuresBanner: some View {
