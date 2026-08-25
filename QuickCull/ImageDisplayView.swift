@@ -395,6 +395,13 @@ private struct ZoomableImageView: View {
     private func dragGesture(container: CGSize, fitted: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .local)
             .onChanged { val in
+                // When loupe is active at fit, hover stops updating while mouse is down.
+                // Drive loupe from drag so click-drag (no-op for pan) keeps lens glued to cursor.
+                if appState.isLoupeActive && scale <= 1.01 {
+                    hoverLocation = val.location
+                    isHovering = true
+                    return
+                }
                 guard scale > 1.01 else { return }
                 var tx = Transaction()
                 tx.animation = nil
@@ -407,7 +414,13 @@ private struct ZoomableImageView: View {
                     offset = clampedOffset(new, container: container, fitted: fitted, scale: scale)
                 }
             }
-            .onEnded { _ in
+            .onEnded { val in
+                if appState.isLoupeActive && scale <= 1.01 {
+                    // Keep loupe at the final drag location so it doesn't snap back to pre-drag hover
+                    hoverLocation = val.location
+                    isHovering = true
+                    return
+                }
                 lastOffset = offset
             }
     }
