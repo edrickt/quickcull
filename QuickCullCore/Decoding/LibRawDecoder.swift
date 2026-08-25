@@ -7,7 +7,7 @@ public final class LibRawDecoder: RawDecoding {
 
     public init() {}
 
-    public func decodeRaw(at url: URL) throws -> RawBitmap {
+    public func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap {
         guard let handle = libraw_init(0) else {
             throw DecodeError.initFailed
         }
@@ -34,6 +34,8 @@ public final class LibRawDecoder: RawDecoding {
                 buf[1] = 4.5
             }
         }
+        handle.pointee.params.user_qual = Int32(options.demosaicQuality)
+        handle.pointee.params.med_passes = Int32(options.medianPasses)
         ret = libraw_dcraw_process(handle)
         guard ret == LIBRAW_SUCCESS.rawValue else {
             throw DecodeError.cannotProcess(errorString(ret))

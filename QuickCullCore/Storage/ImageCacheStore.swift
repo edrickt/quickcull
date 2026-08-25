@@ -61,7 +61,7 @@ public actor ImageCacheStore {
     /// to the pixel buffer before we ever see it. No EXIF orientation tag is
     /// written, so consumers must not transform the pixels again.
     @discardableResult
-    public func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile) throws -> URL {
+    public func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile, quality: CGFloat) throws -> URL {
         try ensureBaseDir()
         let destination = try cacheURL(for: file)
         let tmp = destination.appendingPathExtension("tmp")
@@ -71,7 +71,8 @@ public actor ImageCacheStore {
             tmp as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
             throw CacheError.cannotCreateDestination
         }
-        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: Self.jpegQuality]
+        let q = min(0.95, max(0.5, quality))
+        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: q]
         CGImageDestinationAddImage(sink, bitmap.image, props as CFDictionary)
         guard CGImageDestinationFinalize(sink) else {
             throw CacheError.cannotEncode
@@ -82,6 +83,11 @@ public actor ImageCacheStore {
             try FileManager.default.moveItem(at: tmp, to: destination)
         }
         return destination
+    }
+
+    @discardableResult
+    public func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile) throws -> URL {
+        try storeJPEG(bitmap, for: file, quality: Self.jpegQuality)
     }
 
     /// Sidecar URL for the raw histogram: same cache key, `.hist.json`.

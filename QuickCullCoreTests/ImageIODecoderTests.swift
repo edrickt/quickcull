@@ -103,7 +103,7 @@ final class RoutingDecoderTests: XCTestCase {
 
         init(fail: Bool = false) { self.fail = fail }
 
-        func decodeRaw(at url: URL) throws -> RawBitmap {
+        func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap {
             lock.lock(); defer { lock.unlock() }
             called.append(url.pathExtension.lowercased())
             if fail {

@@ -10,7 +10,7 @@ public final class ImageIODecoder: RawDecoding {
 
     public init() {}
 
-    public func decodeRaw(at url: URL) throws -> RawBitmap {
+    public func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
             throw DecodeError.cannotOpen("cannot open image source")
         }
@@ -50,10 +50,10 @@ public struct RoutingDecoder: RawDecoding {
         self.imageIODecoder = imageIODecoder
     }
 
-    public func decodeRaw(at url: URL) throws -> RawBitmap {
+    public func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap {
         switch RawFileIdentity.decoderKind(for: url) {
-        case .libraw: return try librawDecoder.decodeRaw(at: url)
-        case .imageIO: return try imageIODecoder.decodeRaw(at: url)
+        case .libraw: return try librawDecoder.decodeRaw(at: url, options: options)
+        case .imageIO: return try imageIODecoder.decodeRaw(at: url, options: options)
         case nil: throw DecodeError.cannotOpen("Unsupported format")
         }
     }

@@ -1,6 +1,22 @@
 import CoreGraphics
 import Foundation
 
+public struct DecodeOptions: Sendable, Equatable {
+    public var demosaicQuality: Int
+    public var medianPasses: Int
+    public var useRawSpeedIfAvailable: Bool
+    public var jpegQuality: CGFloat
+    public var cacheMode: CacheMode
+    public enum CacheMode: Sendable, Equatable { case fullRes, displayRes }
+    public init(demosaicQuality: Int = 3, medianPasses: Int = 0, useRawSpeedIfAvailable: Bool = false, jpegQuality: CGFloat = 0.75, cacheMode: CacheMode = .fullRes) {
+        self.demosaicQuality = min(3, max(0, demosaicQuality))
+        self.medianPasses = min(8, max(0, medianPasses))
+        self.useRawSpeedIfAvailable = useRawSpeedIfAvailable
+        self.jpegQuality = min(0.95, max(0.5, jpegQuality))
+        self.cacheMode = cacheMode
+    }
+    public static let v1 = DecodeOptions()
+}
 /// A full-resolution, fully demosaiced image produced by a raw decoder.
 public struct RawBitmap {
     public let image: CGImage
@@ -32,5 +48,8 @@ public enum DecodeError: Error, Equatable {
 /// Abstraction over the raw decoding engine. v1 has one implementation
 /// (`LibRawDecoder`); swapping it (e.g. XPC isolation) must not affect callers.
 public protocol RawDecoding {
-    func decodeRaw(at url: URL) throws -> RawBitmap
+    func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap
+}
+public extension RawDecoding {
+    func decodeRaw(at url: URL) throws -> RawBitmap { try decodeRaw(at: url, options: .v1) }
 }

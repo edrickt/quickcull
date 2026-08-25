@@ -16,7 +16,7 @@ final class StubDecoder: RawDecoding, @unchecked Sendable {
         self.histogram = histogram
     }
 
-    func decodeRaw(at url: URL) throws -> RawBitmap {
+    func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap {
         lock.lock(); defer { lock.unlock() }
         let id = RawFileIdentity.fileID(for: url)
         calls.append(id)
@@ -57,7 +57,7 @@ final class SlowStubDecoder: RawDecoding, @unchecked Sendable {
         self.delay = delay
     }
 
-    func decodeRaw(at url: URL) throws -> RawBitmap {
+    func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap {
         lock.lock(); defer { lock.unlock() }
         let id = RawFileIdentity.fileID(for: url)
         calls.append(id)

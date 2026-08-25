@@ -145,4 +145,14 @@ final class ImageCacheStoreTests: XCTestCase {
                        jpg.lastPathComponent)
         XCTAssertTrue(hist.lastPathComponent.hasSuffix(".hist.json"))
     }
+
+    func testStoreJPEGWithQualityProducesDecodableAndClamped() async throws {
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "q.cr2", in: base))
+        let bmp = RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128), width: 32, height: 16, flip: 0)
+        let dest70 = try await store.storeJPEG(bmp, for: file, quality: 0.70)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest70.path))
+        // Out-of-range clamped, not thrown
+        let destClamped = try await store.storeJPEG(bmp, for: file, quality: 2.0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destClamped.path))
+    }
 }

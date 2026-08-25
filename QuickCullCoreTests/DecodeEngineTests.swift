@@ -188,4 +188,20 @@ final class DecodeEngineTests: XCTestCase {
         XCTAssertEqual(contents.count, 2)
         XCTAssertTrue(contents.allSatisfy { $0.hasSuffix(".jpg") })
     }
+
+    func testDecodeOptionsV1IsDefaultAndSourceCompatible() throws {
+        let bundleURL = try XCTUnwrap(Bundle(for: Self.self).resourceURL)
+        let canonURL = bundleURL.appendingPathComponent("Fixtures/raws/canon_eos6d.cr2")
+        let url: URL
+        if FileManager.default.fileExists(atPath: canonURL.path) {
+            url = canonURL
+        } else {
+            url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "img_0062", withExtension: "cr2", subdirectory: "Fixtures/raws"))
+        }
+        let decoder = LibRawDecoder()
+        let a = try decoder.decodeRaw(at: url) // old signature
+        let b = try decoder.decodeRaw(at: url, options: .v1) // new signature
+        XCTAssertEqual(a.width, b.width)
+        XCTAssertEqual(a.height, b.height)
+    }
 }

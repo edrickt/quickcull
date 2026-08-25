@@ -31,10 +31,12 @@ public actor DecodeEngine {
     private let decoder: RawDecoding
     private let cache: ImageCacheStore
     private let workerCount: Int
+    private let options: DecodeOptions
 
-    public init(decoder: RawDecoding, cache: ImageCacheStore, workerLimit: Int? = nil) {
+    public init(decoder: RawDecoding, cache: ImageCacheStore, workerLimit: Int? = nil, options: DecodeOptions = .v1) {
         self.decoder = decoder
         self.cache = cache
+        self.options = options
         self.workerCount = Self.workerCount(
             activeProcessors: ProcessInfo.processInfo.activeProcessorCount,
             physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
@@ -90,10 +92,10 @@ public actor DecodeEngine {
                                 var benchWidth = 0
                                 var benchHeight = 0
                                 do {
-                                    let bitmap = try self.decoder.decodeRaw(at: file.url)
+                                    let bitmap = try self.decoder.decodeRaw(at: file.url, options: self.options)
                                     benchWidth = bitmap.width
                                     benchHeight = bitmap.height
-                                    try await self.cache.storeJPEG(bitmap, for: file)
+                                    try await self.cache.storeJPEG(bitmap, for: file, quality: self.options.jpegQuality)
                                     // Histogram sidecar is best-effort: its failure
                                     // must never fail the import.
                                     if let hist = bitmap.histogram {
