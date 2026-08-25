@@ -1,5 +1,8 @@
 import Foundation
 import os
+#if canImport(Darwin)
+import Darwin
+#endif
 
 extension OSLog {
     static let decode = OSLog(subsystem: "com.quickcull", category: "decode")
@@ -25,7 +28,20 @@ public actor DecodeEngine {
         case completed([DecodeOutcome])
     }
 
-    public struct Benchmark: Sendable { public let fileID: String; public let totalMs: Double; public let width, height: Int }
+    public struct Benchmark: Sendable {
+        public let fileID: String
+        public let totalMs: Double
+        public let width: Int
+        public let height: Int
+        public let openMs: Double
+        public let unpackMs: Double
+        public let processMs: Double
+        public let encodeMs: Double
+        public init(fileID: String, totalMs: Double, width: Int, height: Int, openMs: Double = 0, unpackMs: Double = 0, processMs: Double = 0, encodeMs: Double = 0) {
+            self.fileID = fileID; self.totalMs = totalMs; self.width = width; self.height = height
+            self.openMs = openMs; self.unpackMs = unpackMs; self.processMs = processMs; self.encodeMs = encodeMs
+        }
+    }
     private let benchmarkAccum = AtomicBenchmarkAccum()
 
     private let decoder: RawDecoding
@@ -66,8 +82,21 @@ public actor DecodeEngine {
         return max(1, count)
     }
     private static func availableMemoryBytes() -> UInt64? {
-        // use host_statistics64 or os_proc_available_memory fallback; return nil if unavailable
-        return nil // stub — implement with vm_statistics if needed, else nil keeps prior behavior
+#if canImport(Darwin)
+        var stat = vm_statistics64()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
+        let kerr = withUnsafeMutablePointer(to: &stat) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+        guard kerr == KERN_SUCCESS else { return nil }
+        let pageSize = UInt64(vm_kernel_page_size)
+        // free + inactive is a reasonable proxy for reclaimable memory
+        return UInt64(stat.free_count) * pageSize + UInt64(stat.inactive_count) * pageSize
+#else
+        return nil
+#endif
     }
 
     public func decodeAll(files: [SessionFile]) -> AsyncStream<Event> {

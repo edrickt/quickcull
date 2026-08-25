@@ -24,12 +24,12 @@ public final class ImageIODecoder: RawDecoding {
         // Full-resolution decode; the thumbnail API with transform bakes the
         // EXIF orientation into the pixels (mirrors ImageWindow.loadJPEG).
         let maxPixel = max(width, height)
-        let options: [CFString: Any] = [
+        let thumbOptions: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixel,
             kCGImageSourceCreateThumbnailWithTransform: true,
         ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) else {
             throw DecodeError.cannotProcess("image decode failed")
         }
 

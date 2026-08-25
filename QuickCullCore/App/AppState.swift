@@ -14,13 +14,9 @@ public enum AppPhase: Equatable {
 @MainActor
 @Observable
 public final class AppState {
-    public private(set) var phase: AppPhase = .empty {
-        didSet { if phase != .scrubbing { isLoupeActive = false } }
-    }
+    public private(set) var phase: AppPhase = .empty
     public enum ViewMode: Equatable, Sendable { case scrub, split, grid }
-    public private(set) var viewMode: ViewMode = .scrub {
-        didSet { if viewMode == .grid { isLoupeActive = false } }
-    }
+    public private(set) var viewMode: ViewMode = .scrub
     public private(set) var gridSelection: Set<String> = []
     private var gridAnchorID: String?
     public private(set) var session: Session?
@@ -37,7 +33,6 @@ public final class AppState {
     /// `internal(set)` so tests can inject failures; app code treats as read-only.
     public internal(set) var moveFailures: [MoveOutcome] = []
     public private(set) var isMoving: Bool = false
-    public private(set) var isLoupeActive: Bool = false
     private let mover: Moving
 
     public private(set) var thumbWindow: ImageWindow?
@@ -87,21 +82,10 @@ public final class AppState {
         lastMoveColor = nil
         moveFailures = []
         isMoving = false
-        isLoupeActive = false
         gridSelection = []
         gridAnchorID = nil
         viewMode = .scrub
         phase = .empty
-    }
-
-    public func setLoupeActive(_ active: Bool) {
-        guard phase == .scrubbing, !isMoving, !isCommitting else {
-            if isLoupeActive { isLoupeActive = false }
-            return
-        }
-        // Don't show loupe in Grid
-        if viewMode == .grid, active { return }
-        isLoupeActive = active
     }
 
     /// Import: validate + dedupe, then Phase 1 (decode everything), then scrub.
