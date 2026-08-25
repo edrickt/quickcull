@@ -1,4 +1,9 @@
 import Foundation
+import os
+
+extension OSLog {
+    static let decode = OSLog(subsystem: "com.quickcull", category: "decode")
+}
 
 public struct DecodeOutcome: Equatable {
     public let file: SessionFile
@@ -20,6 +25,9 @@ public actor DecodeEngine {
         case completed([DecodeOutcome])
     }
 
+    public struct Benchmark: Sendable { public let fileID: String; public let totalMs: Double; public let width, height: Int }
+    private let benchmarkAccum = AtomicBenchmarkAccum()
+
     private let decoder: RawDecoding
     private let cache: ImageCacheStore
     private let workerCount: Int
@@ -31,6 +39,10 @@ public actor DecodeEngine {
             activeProcessors: ProcessInfo.processInfo.activeProcessorCount,
             physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
             limit: workerLimit)
+    }
+
+    public func benchmarks() -> [Benchmark] {
+        benchmarkAccum.snapshot()
     }
 
     /// Memory-bounded worker rule: one worker per 1 GB of physical RAM
@@ -71,9 +83,16 @@ public actor DecodeEngine {
                         group.addTask {
                             while let file = await queue.dequeue() {
                                 if Task.isCancelled { break }
+                                let signpostID = OSSignpostID(log: OSLog.decode)
+                                os_signpost(.begin, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}s", file.id)
+                                let t0 = CFAbsoluteTimeGetCurrent()
                                 let outcome: DecodeOutcome
+                                var benchWidth = 0
+                                var benchHeight = 0
                                 do {
                                     let bitmap = try self.decoder.decodeRaw(at: file.url)
+                                    benchWidth = bitmap.width
+                                    benchHeight = bitmap.height
                                     try await self.cache.storeJPEG(bitmap, for: file)
                                     // Histogram sidecar is best-effort: its failure
                                     // must never fail the import.
@@ -87,6 +106,9 @@ public actor DecodeEngine {
                                     outcome = DecodeOutcome(file: file,
                                                             error: .cannotProcess("\(error)"))
                                 }
+                                let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+                                self.benchmarkAccum.append(Benchmark(fileID: file.id, totalMs: totalMs, width: benchWidth, height: benchHeight))
+                                os_signpost(.end, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}s totalMs=%{public}f", file.id, totalMs)
                                 outcomes.append(outcome)
                                 await reporter.reportProgress()
                             }
@@ -144,6 +166,21 @@ final class AtomicOutcomeAccumulator: @unchecked Sendable {
     }
 
     func snapshot() -> [DecodeOutcome] {
+        lock.lock(); defer { lock.unlock() }
+        return items
+    }
+}
+
+final class AtomicBenchmarkAccum: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [DecodeEngine.Benchmark] = []
+
+    func append(_ b: DecodeEngine.Benchmark) {
+        lock.lock(); defer { lock.unlock() }
+        items.append(b)
+    }
+
+    func snapshot() -> [DecodeEngine.Benchmark] {
         lock.lock(); defer { lock.unlock() }
         return items
     }

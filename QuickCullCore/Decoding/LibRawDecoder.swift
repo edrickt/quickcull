@@ -45,35 +45,11 @@ public final class LibRawDecoder: RawDecoding {
         }
         defer { libraw_dcraw_clear_mem(processed) }
 
-        let p = processed.pointee
-        let expected = Int(p.width) * Int(p.height) * 3
-        guard p.type == LIBRAW_IMAGE_BITMAP, p.colors == 3, p.bits == 8,
-              p.width > 0, p.height > 0, Int(p.data_size) == expected else {
-            throw DecodeError.invalidOutput
-        }
-
-        // `data` is a C flexible-array member (`unsigned char data[1]`), which
-        // Swift imports as a `UInt8` scalar; the pixel buffer lives immediately
-        // after the struct in libraw's allocation, so take its address through
-        // the heap pointee (a `let p = processed.pointee` copy would not do).
-        let data = withUnsafePointer(to: &processed.pointee.data) { ptr in
-            Data(bytes: ptr, count: Int(p.data_size))
-        }
-        guard let provider = CGDataProvider(data: data as CFData),
-              let image = CGImage(
-                  width: Int(p.width), height: Int(p.height),
-                  bitsPerComponent: 8, bitsPerPixel: 24,
-                  bytesPerRow: Int(p.width) * 3,
-                  space: CGColorSpaceCreateDeviceRGB(),
-                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
-                  provider: provider, decode: nil,
-                  shouldInterpolate: false, intent: .defaultIntent) else {
-            throw DecodeError.invalidOutput
-        }
+        let image = try makeCGImage(from: processed)
 
         return RawBitmap(image: image,
-                         width: Int(p.width),
-                         height: Int(p.height),
+                         width: Int(processed.pointee.width),
+                         height: Int(processed.pointee.height),
                          flip: Int(handle.pointee.sizes.flip),
                          histogram: histogram)
     }
@@ -104,6 +80,31 @@ public final class LibRawDecoder: RawDecoding {
             }
         }
         return RawHistogram(bins: counts, luminance: luma, sensorMax: maxLevel)
+    }
+
+    private func makeCGImage(from processed: UnsafeMutablePointer<libraw_processed_image_t>) throws -> CGImage {
+        let p = processed.pointee
+        let expected = Int(p.width) * Int(p.height) * 3
+        guard p.type == LIBRAW_IMAGE_BITMAP, p.colors == 3, p.bits == 8,
+              p.width > 0, p.height > 0, Int(p.data_size) == expected else {
+            throw DecodeError.invalidOutput
+        }
+        let dataSize = Int(p.data_size)
+        let dataPtr = withUnsafePointer(to: &processed.pointee.data) { $0 }
+        // Single copy via CFData; provider retains it — no extra Data copy
+        let cfData: CFData? = CFDataCreate(nil, dataPtr.withMemoryRebound(to: UInt8.self, capacity: dataSize) { $0 }, dataSize)
+        guard let cfData,
+              let provider = CGDataProvider(data: cfData) else { throw DecodeError.invalidOutput }
+        guard let image = CGImage(width: Int(p.width), height: Int(p.height),
+                                  bitsPerComponent: 8, bitsPerPixel: 24,
+                                  bytesPerRow: Int(p.width) * 3,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                                  provider: provider, decode: nil,
+                                  shouldInterpolate: false, intent: .defaultIntent) else {
+            throw DecodeError.invalidOutput
+        }
+        return image
     }
 
     private func errorString(_ code: Int32) -> String {

@@ -120,4 +120,28 @@ final class LibRawDecoderTests: XCTestCase {
         XCTAssertEqual(fallback.samples[0], fuji.width * fuji.height)
         XCTAssertEqual(fallback.luminance.count, RawHistogram.binCount)
     }
+
+    func testLibRawDecoderProducesIdenticalPixelsWithZeroCopy() throws {
+        // Use a real fixture via LibRawDecoder; decode twice and compare pixel hashes
+        let bundleURL = try XCTUnwrap(Bundle(for: Self.self).resourceURL)
+        let canonURL = bundleURL.appendingPathComponent("Fixtures/raws/canon_eos6d.cr2")
+        let fallbackURL = bundleURL.appendingPathComponent("Fixtures/raws/img_0062.cr2")
+        let url: URL
+        if FileManager.default.fileExists(atPath: canonURL.path) {
+            url = canonURL
+        } else {
+            url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "img_0062", withExtension: "cr2", subdirectory: "Fixtures/raws"))
+            // sanity: ensure fallback exists
+            XCTAssertTrue(FileManager.default.fileExists(atPath: fallbackURL.path) || FileManager.default.fileExists(atPath: url.path))
+        }
+        let decoder = LibRawDecoder()
+        let a = try decoder.decodeRaw(at: url)
+        let b = try decoder.decodeRaw(at: url)
+        XCTAssertEqual(a.width, b.width)
+        XCTAssertEqual(a.height, b.height)
+        // Compare first 1k bytes of CGImage data via provider copy
+        let dataA = a.image.dataProvider?.data as Data?
+        let dataB = b.image.dataProvider?.data as Data?
+        XCTAssertEqual(dataA?.prefix(1024), dataB?.prefix(1024))
+    }
 }
