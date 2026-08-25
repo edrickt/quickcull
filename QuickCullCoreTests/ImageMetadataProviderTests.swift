@@ -24,7 +24,9 @@ final class ImageMetadataProviderTests: XCTestCase {
         XCTAssertNil(meta.camera) // no EXIF
     }
 
-    func testDimensionsFromCGImagePreferred() throws {
+    /// Last-resort fallback: when neither the decoded cache JPEG nor the
+    /// source file expose dimensions, the displayed CGImage is used.
+    func testDimensionsFallBackToCGImageWhenNoFileMetadata() throws {
         let url = tmp.appendingPathComponent("a.jpg")
         try Data(repeating: 0, count: 10).write(to: url)
         // Create a 6000x4000 CGImage stub via color space
@@ -34,6 +36,52 @@ final class ImageMetadataProviderTests: XCTestCase {
         let file = SessionFile(url: url)
         let meta = ImageMetadataProvider.metadata(for: file, cgImage: img)
         XCTAssertEqual(meta.dimensions, "6000×4000")
+    }
+
+    /// Regression: the HUD passes the *displayed* CGImage, which is a 320px
+    /// thumbnail (or a screen-limited downsample) — never the file's true
+    /// dimensions. The decoded cache JPEG is full-res with orientation baked
+    /// in, so its dimensions must win even when the displayed image is a
+    /// tiny thumbnail.
+    func testDimensionsPreferDecodedCacheJPEGOverCGImage() throws {
+        let cs = CGColorSpaceCreateDeviceRGB()
+        // A real 800x600 JPEG standing in for the decoded full-res cache entry
+        let cacheJPEG = tmp.appendingPathComponent("decoded.jpg")
+        let fullCtx = CGContext(data: nil, width: 800, height: 600, bitsPerComponent: 8, bytesPerRow: 0, space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        let dest = CGImageDestinationCreateWithURL(cacheJPEG as CFURL, "public.jpeg" as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, fullCtx.makeImage()!, nil)
+        CGImageDestinationFinalize(dest)
+
+        // Thumbnail-sized displayed image (320px long edge), like ImageWindow's loader
+        let thumbCtx = CGContext(data: nil, width: 320, height: 240, bitsPerComponent: 8, bytesPerRow: 0, space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        let thumb = thumbCtx.makeImage()!
+
+        // Raw source: ImageIO cannot read pixel dimensions from the file itself
+        let url = tmp.appendingPathComponent("IMG_0001.CR2")
+        try Data(repeating: 0xAB, count: 1_000).write(to: url)
+        let file = SessionFile(url: url)
+        let meta = ImageMetadataProvider.metadata(for: file, cgImage: thumb, cacheJPEGURL: cacheJPEG)
+        XCTAssertEqual(meta.dimensions, "800×600")
+    }
+
+    /// Without a cache entry yet, the source file's own properties are the
+    /// authority over the displayed (possibly thumbnail-sized) CGImage.
+    func testDimensionsFallBackToSourcePropsWhenCacheMissing() throws {
+        let cs = CGColorSpaceCreateDeviceRGB()
+        // Real 640x480 JPEG source
+        let url = tmp.appendingPathComponent("IMG_0001.jpg")
+        let ctx = CGContext(data: nil, width: 640, height: 480, bitsPerComponent: 8, bytesPerRow: 0, space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, ctx.makeImage()!, nil)
+        CGImageDestinationFinalize(dest)
+
+        // Thumbnail-sized displayed image
+        let thumbCtx = CGContext(data: nil, width: 320, height: 240, bitsPerComponent: 8, bytesPerRow: 0, space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        let thumb = thumbCtx.makeImage()!
+
+        let file = SessionFile(url: url)
+        let meta = ImageMetadataProvider.metadata(for: file, cgImage: thumb, cacheJPEGURL: nil)
+        XCTAssertEqual(meta.dimensions, "640×480")
     }
 
     func testMissingFileReturnsMinimal() {

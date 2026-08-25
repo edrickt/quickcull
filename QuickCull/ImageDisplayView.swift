@@ -634,19 +634,31 @@ private struct MetadataHUDView: View {
         }
         // Compound task id includes cgImage dimensions so thumb (320px) → full-res upgrade reruns
         // and updates dimensions; detached utility task runs file I/O off main.
-        // Note: Task.detached is not a child of the outer .task, so cancellation of the outer
-        // task (on rapid scrub) does not automatically cancel the detached work; the outer
-        // .task discards its result when cancelled and only the latest file/dimensions wins.
+        // Cancellation: when the id changes (thumb→full-res or file change),
+        // SwiftUI cancels this task, but the detached workers below are NOT
+        // cancelled and keep running to completion. Without a guard, the
+        // cancelled task body resumes after `await` and writes its stale
+        // result (thumbnail dimensions, or the previous file's whole
+        // metadata block) over the newer task's output. Guard each state
+        // write so only the latest task wins.
         .task(id: "\(file.id)-\(cgImage?.width ?? 0)x\(cgImage?.height ?? 0)") {
             histogram = nil
             async let meta = Task.detached(priority: .utility) {
-                ImageMetadataProvider.metadata(for: file, cgImage: cgImage)
+                // True dimensions come from the decoded cache JPEG (full-res,
+                // orientation baked in) — never from the displayed CGImage,
+                // which may be a 320px thumbnail or screen-limited downsample.
+                let cacheURL = try? await cache.cacheURL(for: file)
+                return ImageMetadataProvider.metadata(for: file, cgImage: cgImage, cacheJPEGURL: cacheURL)
             }.value
             async let hist = Task.detached(priority: .utility) {
                 (try? await cache.loadHistogram(for: file)) ?? cgImage.map { DisplayHistogram.compute(from: $0) }
             }.value
-            metadata = await meta
-            histogram = await hist
+            let m = await meta
+            guard !Task.isCancelled else { return }
+            metadata = m
+            let h = await hist
+            guard !Task.isCancelled else { return }
+            histogram = h
         }
     }
 

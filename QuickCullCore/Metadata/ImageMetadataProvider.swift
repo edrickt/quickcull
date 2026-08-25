@@ -19,13 +19,19 @@ public struct ImageMetadata: Equatable, Sendable {
 }
 
 public enum ImageMetadataProvider {
-    public static func metadata(for file: SessionFile, cgImage: CGImage?) -> ImageMetadata {
+    /// - Parameter cacheJPEGURL: URL of the file's decoded cache JPEG
+    ///   (full-res, orientation baked in). The displayed `cgImage` is often a
+    ///   320px thumbnail or a screen-limited downsample, so its dimensions
+    ///   must never be treated as the file's true resolution.
+    public static func metadata(for file: SessionFile, cgImage: CGImage?, cacheJPEGURL: URL? = nil) -> ImageMetadata {
         let filename = file.url.lastPathComponent
         let filePath = file.url.standardizedFileURL.path
-        // Dimensions: prefer cgImage, fallback to source props
+        // Dimensions: decoded cache JPEG → source file props → displayed
+        // CGImage (last resort only; see `cacheJPEGURL` doc).
         var dimensions: String?
-        if let img = cgImage {
-            dimensions = "\(img.width)×\(img.height)"
+        if let cacheJPEGURL,
+           let dims = Self.pixelDimensions(at: cacheJPEGURL) {
+            dimensions = dims
         }
         // File size
         var fileSize: String?
@@ -131,6 +137,12 @@ public enum ImageMetadataProvider {
             // Avoid overriding EXIF date; this is second-chance fallback
             dateTaken = DateFormatter.localizedString(from: cdate, dateStyle: .medium, timeStyle: .short)
         }
+        // Last resort: the displayed image itself. This is what the user sees
+        // on screen, but it may be a 320px thumbnail or a screen-limited
+        // downsample, so it must never outrank the file's own metadata.
+        if dimensions == nil, let img = cgImage {
+            dimensions = "\(img.width)×\(img.height)"
+        }
 
         return ImageMetadata(
             filename: filename,
@@ -147,5 +159,30 @@ public enum ImageMetadataProvider {
             exposureBias: exposureBias,
             whiteBalance: whiteBalance
         )
+    }
+
+    /// Reads "WxH" from an image file's own properties (header only, no
+    /// pixel decode). The cache JPEG is written from the full-res decode
+    /// with orientation baked in, so its dimensions are the file's true
+    /// resolution.
+    private static func pixelDimensions(at url: URL) -> String? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return nil
+        }
+        var w: Int?
+        var h: Int?
+        if let v = props[kCGImagePropertyPixelWidth] as? Int {
+            w = v
+        } else if let v = props[kCGImagePropertyPixelWidth] as? NSNumber {
+            w = v.intValue
+        }
+        if let v = props[kCGImagePropertyPixelHeight] as? Int {
+            h = v
+        } else if let v = props[kCGImagePropertyPixelHeight] as? NSNumber {
+            h = v.intValue
+        }
+        guard let w, let h, w > 0, h > 0 else { return nil }
+        return "\(w)×\(h)"
     }
 }
