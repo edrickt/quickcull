@@ -11,7 +11,7 @@ public struct DecodeOutcome: Equatable {
 }
 
 /// Phase 1: decode every file to a cached full-res q75 JPEG in parallel,
-/// bounded by the memory-aware worker rule (one worker per 2 GB of RAM,
+/// bounded by the memory-aware worker rule (one worker per 1 GB of RAM,
 /// capped by core count). Emits strictly monotonic progress events, then
 /// exactly one completed event with per-file outcomes.
 public actor DecodeEngine {
@@ -33,18 +33,27 @@ public actor DecodeEngine {
             limit: workerLimit)
     }
 
-    /// Memory-bounded worker rule: one worker per 2 GB of physical RAM
+    /// Memory-bounded worker rule: one worker per 1 GB of physical RAM
     /// (LibRaw unpack + demosaic + mem image + JPEG encode for a 45 MP raw
     /// needs ≈512 MB transient per worker), capped by core count; explicit
     /// limits are floor-1.
     public static func workerCount(activeProcessors: Int,
                                    physicalMemoryBytes: UInt64,
                                    limit: Int?) -> Int {
-        if let limit {
-            return max(1, limit)
+        if let limit { return max(1, limit) }
+        let byMemory = max(1, Int(physicalMemoryBytes / (1 * 1024 * 1024 * 1024)))
+        var count = min(max(1, activeProcessors), byMemory)
+        // Memory-pressure guard: if <1 GiB free, shed one worker
+        #if canImport(Darwin)
+        if let free = Self.availableMemoryBytes(), free < 1 * 1024 * 1024 * 1024 {
+            count = max(1, count - 1)
         }
-        let byMemory = max(1, Int(physicalMemoryBytes / (2 * 1024 * 1024 * 1024)))
-        return min(max(1, activeProcessors), byMemory)
+        #endif
+        return max(1, count)
+    }
+    private static func availableMemoryBytes() -> UInt64? {
+        // use host_statistics64 or os_proc_available_memory fallback; return nil if unavailable
+        return nil // stub — implement with vm_statistics if needed, else nil keeps prior behavior
     }
 
     public func decodeAll(files: [SessionFile]) -> AsyncStream<Event> {

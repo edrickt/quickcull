@@ -22,6 +22,13 @@ public actor ImageCacheStore {
         return appSupport.appendingPathComponent("QuickCull/cache", isDirectory: true)
     }
 
+    private var baseDirEnsured = false
+    private func ensureBaseDir() throws {
+        if baseDirEnsured { return }
+        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        baseDirEnsured = true
+    }
+
     /// Authoritative launch-time cleanup: delete everything, recreate.
     public func wipe() throws {
         let fm = FileManager.default
@@ -29,6 +36,7 @@ public actor ImageCacheStore {
             try fm.removeItem(at: baseURL)
         }
         try fm.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        baseDirEnsured = false
     }
 
     /// Cache key: SHA256 of "<standardized path>|<size>|<mtime-us>".
@@ -54,7 +62,7 @@ public actor ImageCacheStore {
     /// written, so consumers must not transform the pixels again.
     @discardableResult
     public func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile) throws -> URL {
-        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        try ensureBaseDir()
         let destination = try cacheURL(for: file)
         let tmp = destination.appendingPathExtension("tmp")
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -85,7 +93,7 @@ public actor ImageCacheStore {
 
     /// Store the raw histogram as an atomic JSON sidecar next to the JPEG.
     public func storeHistogram(_ hist: RawHistogram, for file: SessionFile) throws {
-        try FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
+        try ensureBaseDir()
         let destination = try histogramURL(for: file)
         let tmp = destination.appendingPathExtension("tmp")
         defer { try? FileManager.default.removeItem(at: tmp) }

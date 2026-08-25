@@ -79,14 +79,28 @@ final class DecodeEngineTests: XCTestCase {
 
     func testWorkerCountFormula() {
         let gb = UInt64(1024 * 1024 * 1024)
-        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: nil), 4)
-        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 16, physicalMemoryBytes: 16 * gb, limit: nil), 8)
-        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 32, physicalMemoryBytes: 32 * gb, limit: nil), 16)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: nil), 8)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 16, physicalMemoryBytes: 16 * gb, limit: nil), 16)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 32, physicalMemoryBytes: 32 * gb, limit: nil), 32)
         XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 2, physicalMemoryBytes: 8 * gb, limit: nil), 2)
         XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: 2), 2)
         XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: 0), 1)
         // Load-bearing floor: a <2 GB machine must still get at least one
         // worker, or decodeAll would emit `.completed([])` (fake success).
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 1 * gb, limit: nil), 1)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 512 * 1024 * 1024, limit: nil), 1)
+    }
+
+    func testWorkerCountRetunedFormula() {
+        let gb = UInt64(1024 * 1024 * 1024)
+        // Spec: min(cores, max(1, mem / 1 GiB)) with pressure guard inactive
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: nil), 8) // was 4
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 10, physicalMemoryBytes: 16 * gb, limit: nil), 10) // was 8
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 4 * gb, limit: nil), 4) // was 2
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 4, physicalMemoryBytes: 4 * gb, limit: nil), 4)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 32, physicalMemoryBytes: 32 * gb, limit: nil), 32)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 2, physicalMemoryBytes: 8 * gb, limit: nil), 2)
+        XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 8 * gb, limit: 2), 2)
         XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 1 * gb, limit: nil), 1)
         XCTAssertEqual(DecodeEngine.workerCount(activeProcessors: 8, physicalMemoryBytes: 512 * 1024 * 1024, limit: nil), 1)
     }
