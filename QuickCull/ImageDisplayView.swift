@@ -132,10 +132,18 @@ private struct ZoomableImageView: View {
     @Binding var offset: CGSize
     @Binding var lastOffset: CGSize
 
+    @Environment(AppState.self) private var appState
+
     @State private var globalFrame: CGRect = .zero
     @State private var scrollMonitor: Any?
     @State private var liveContainer: CGSize = .zero
     @State private var liveFitted: CGSize = .zero
+    @State private var hoverLocation: CGPoint?
+    @State private var isHovering: Bool = false
+    @State private var isCursorHidden: Bool = false
+
+    private let loupeDiameter: CGFloat = 280
+    private let loupeOffset: CGPoint = .zero // centered over cursor per user request
 
     var body: some View {
         GeometryReader { geo in
@@ -158,10 +166,39 @@ private struct ZoomableImageView: View {
                         .offset(offset)
                         .allowsHitTesting(false)
                 }
+
+                // Loupe: 100% 1:1 magnifier lens following cursor while Space held.
+                // Only at fit (scale ~1), only while hovering inside the image, not while zoomed/panned.
+                if shouldShowLoupe(container: container, fitted: fitted) {
+                    LoupeView(
+                        cgImage: cgImage,
+                        hoverLocation: hoverLocation!,
+                        container: container,
+                        fitted: fitted,
+                        diameter: loupeDiameter,
+                        offset: loupeOffset,
+                        scale: scale,
+                        panOffset: offset
+                    )
+                    .allowsHitTesting(false)
+                    .transition(.opacity.animation(.easeOut(duration: 0.12)))
+                }
             }
             .frame(width: container.width, height: container.height)
             .contentShape(Rectangle())
             .clipped()
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let loc):
+                    hoverLocation = loc
+                    isHovering = true
+                case .ended:
+                    isHovering = false
+                    hoverLocation = nil
+                @unknown default:
+                    break
+                }
+            }
             .onTapGesture(count: 2) {
                 handleDoubleClick()
             }
@@ -178,8 +215,18 @@ private struct ZoomableImageView: View {
                 liveContainer = container
                 liveFitted = fitted
                 installScrollMonitor()
+                syncLoupeCursor()
             }
-            .onDisappear { removeScrollMonitor() }
+            .onDisappear {
+                removeScrollMonitor()
+                if isCursorHidden {
+                    NSCursor.unhide()
+                    isCursorHidden = false
+                }
+            }
+            .onChange(of: appState.isLoupeActive) { _, _ in syncLoupeCursor() }
+            .onChange(of: isHovering) { _, _ in syncLoupeCursor() }
+            .onChange(of: hoverLocation) { _, _ in syncLoupeCursor() }
             .onChange(of: container) { _, newValue in
                 liveContainer = newValue
                 liveFitted = fittedSize(for: cgImage, in: newValue)
@@ -205,6 +252,62 @@ private struct ZoomableImageView: View {
                     lastOffset = clamped
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                if isCursorHidden { NSCursor.unhide(); isCursorHidden = false }
+                Task { @MainActor in appState.setLoupeActive(false) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+                if isCursorHidden { NSCursor.unhide(); isCursorHidden = false }
+                Task { @MainActor in appState.setLoupeActive(false) }
+            }
+        }
+    }
+
+    private func shouldShowLoupe(container: CGSize, fitted: CGSize) -> Bool {
+        guard appState.isLoupeActive else { return false }
+        guard isHovering, let loc = hoverLocation else { return false }
+        guard scale <= 1.01 else { return false } // hide while zoomed; loupe is for fit inspection
+        // Must be hovering over the image itself, not the letterbox
+        let imageRect = imageRect(container: container, fitted: fitted)
+        // When zoomed we already returned, but pan offset would shift rect; since we hide loupe when zoomed, ignore offset
+        return imageRect.contains(loc)
+    }
+
+    private func imageRect(container: CGSize, fitted: CGSize) -> CGRect {
+        // Image is centered in container when at fit. When zoomed we hide loupe, so no offset needed.
+        CGRect(
+            x: (container.width - fitted.width) / 2,
+            y: (container.height - fitted.height) / 2,
+            width: fitted.width,
+            height: fitted.height
+        )
+    }
+
+    private func syncLoupeCursor() {
+        let shouldHide: Bool = {
+            guard appState.isLoupeActive else { return false }
+            guard isHovering, let loc = hoverLocation else { return false }
+            guard scale <= 1.01 else { return false }
+            guard liveContainer.width > 0, liveFitted.width > 0 else { return false }
+            let rect = CGRect(
+                x: (liveContainer.width - liveFitted.width) / 2,
+                y: (liveContainer.height - liveFitted.height) / 2,
+                width: liveFitted.width,
+                height: liveFitted.height
+            )
+            return rect.contains(loc)
+        }()
+        setCursorHidden(shouldHide)
+    }
+
+    private func setCursorHidden(_ hidden: Bool) {
+        if hidden == isCursorHidden { return }
+        if hidden {
+            NSCursor.hide()
+            isCursorHidden = true
+        } else {
+            NSCursor.unhide()
+            isCursorHidden = false
         }
     }
 
@@ -351,6 +454,102 @@ private struct ZoomableImageView: View {
             width: min(max(off.width, -maxX), maxX),
             height: min(max(off.height, -maxY), maxY)
         )
+    }
+}
+
+/// 100% magnifier lens that follows the cursor while Space is held.
+/// Crops the displayed CGImage at 1:1 (backing-pixel aware) around the cursor's image-space coordinate.
+private struct LoupeView: View {
+    let cgImage: CGImage
+    let hoverLocation: CGPoint
+    let container: CGSize
+    let fitted: CGSize
+    let diameter: CGFloat
+    let offset: CGPoint
+    let scale: CGFloat
+    let panOffset: CGSize
+
+    var body: some View {
+        GeometryReader { _ in
+            let backing = NSScreen.main?.backingScaleFactor ?? 2.0
+            let cropSize = diameter * backing
+            let cropped: CGImage? = croppedImage(cropSize: cropSize)
+
+            // Position lens near cursor, clamped to container so it never leaves the pane
+            let lensCenter = clampedLensCenter()
+            ZStack {
+                if let img = cropped {
+                    Image(decorative: img, scale: backing)
+                        .resizable()
+                        .interpolation(.none) // nearest-neighbor for true pixel view; .high would blur
+                        .frame(width: diameter, height: diameter)
+                        .clipped()
+                } else {
+                    Color.black.frame(width: diameter, height: diameter)
+                }
+                // crosshair for precise focus check
+                Color.white.frame(width: 12, height: 0.5).opacity(0.7)
+                Color.white.frame(width: 0.5, height: 12).opacity(0.7)
+                // border
+                Circle().stroke(Color.white.opacity(0.95), lineWidth: 2)
+                Circle().stroke(Color.black.opacity(0.4), lineWidth: 0.5)
+            }
+            .frame(width: diameter, height: diameter)
+            .clipShape(Circle())
+            .shadow(color: .black.opacity(0.45), radius: 10, x: 0, y: 6)
+            .overlay(
+                Circle().stroke(Color.white.opacity(0.9), lineWidth: 2)
+                    .shadow(color: .black.opacity(0.3), radius: 2)
+            )
+            .position(x: lensCenter.x, y: lensCenter.y)
+            // info badge: 100% label
+            .overlay(alignment: .bottom) {
+                Text("100%")
+                    .font(.caption2.monospaced())
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.black.opacity(0.65), in: Capsule())
+                    .foregroundStyle(.white)
+                    .offset(y: 16)
+            }
+        }
+        .frame(width: container.width, height: container.height)
+        .allowsHitTesting(false)
+    }
+
+    private func clampedLensCenter() -> CGPoint {
+        // Center exactly over cursor; no offset, no clamping to container —
+        // part of the lens may clip at the window edge, but the center stays true.
+        CGPoint(x: hoverLocation.x + offset.x, y: hoverLocation.y + offset.y)
+    }
+
+    private func croppedImage(cropSize: CGFloat) -> CGImage? {
+        // Image rect centered in container at fit
+        let imageRect = CGRect(
+            x: (container.width - fitted.width) / 2,
+            y: (container.height - fitted.height) / 2,
+            width: fitted.width,
+            height: fitted.height
+        )
+        // Hover relative inside image (0...1)
+        let relX = (hoverLocation.x - imageRect.minX) / fitted.width
+        let relY = (hoverLocation.y - imageRect.minY) / fitted.height
+        // Clamp 0...1 to avoid NaN when cursor at edge due to float error
+        let clampedRelX = min(max(relX, 0), 1)
+        let clampedRelY = min(max(relY, 0), 1)
+        let pixelX = clampedRelX * CGFloat(cgImage.width)
+        let pixelY = clampedRelY * CGFloat(cgImage.height)
+
+        var cropX = pixelX - cropSize / 2
+        var cropY = pixelY - cropSize / 2
+        // Clamp crop to image bounds
+        cropX = min(max(cropX, 0), CGFloat(cgImage.width) - cropSize)
+        cropY = min(max(cropY, 0), CGFloat(cgImage.height) - cropSize)
+        // If image smaller than cropSize (tiny thumbnail before display load), just return original centered
+        if cropSize > CGFloat(cgImage.width) || cropSize > CGFloat(cgImage.height) {
+            return cgImage
+        }
+        let rect = CGRect(x: cropX, y: cropY, width: cropSize, height: cropSize)
+        return cgImage.cropping(to: rect)
     }
 }
 
