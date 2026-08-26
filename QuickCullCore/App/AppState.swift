@@ -38,11 +38,6 @@ public final class AppState {
     public internal(set) var moveFailures: [MoveOutcome] = []
     public private(set) var isMoving: Bool = false
     public private(set) var isLoupeActive: Bool = false
-    /// First-picture preview: the shoot's first photo, surfaced as soon as
-    /// its cache JPEG lands while the rest of the import decodes. Input
-    /// stays locked until `.completed` (blocking guarantee unchanged);
-    /// dropped when scrubbing begins.
-    public private(set) var decodePreview: CGImage? = nil
     private let mover: Moving
 
     public private(set) var thumbWindow: ImageWindow?
@@ -53,20 +48,16 @@ public final class AppState {
     private let decoder: RawDecoding
     private let trasher: Trashing
     private let decodeOptions: DecodeOptions = .v1
-    /// Test seam: bounds DecodeEngine workers (nil = default memory rule).
-    private let decodeWorkerLimit: Int?
 
     public init(decoder: RawDecoding = RoutingDecoder(librawDecoder: LibRawDecoder(),
                                                       imageIODecoder: ImageIODecoder()),
                 cache: ImageCacheStore = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()),
                 trasher: Trashing = FileManagerTrasher(),
-                mover: Moving = FileManagerMover(),
-                decodeWorkerLimit: Int? = nil) {
+                mover: Moving = FileManagerMover()) {
         self.decoder = decoder
         self.cache = cache
         self.trasher = trasher
         self.mover = mover
-        self.decodeWorkerLimit = decodeWorkerLimit
     }
 
     /// Launch-time authoritative cache cleanup (leftovers from crashes
@@ -159,18 +150,14 @@ public final class AppState {
         lastMoveColor = nil
         moveFailures = []
         isMoving = false
-        decodePreview = nil
         phase = .decoding(completed: 0, total: files.count)
 
-        let engine = DecodeEngine(decoder: decoder, cache: cache,
-                                  workerLimit: decodeWorkerLimit, options: decodeOptions)
+        let engine = DecodeEngine(decoder: decoder, cache: cache, options: decodeOptions)
         Task {
             for await event in await engine.decodeAll(files: files) {
                 switch event {
                 case .progress(let completed, let total):
                     phase = .decoding(completed: completed, total: total)
-                case .fileDecoded(let file, let cacheURL):
-                    handleDecodedFile(file, cacheURL: cacheURL)
                 case .completed(let outcomes):
                     importFailures = unsupportedFailures + outcomes.filter { $0.error != nil }
                     let failed = outcomes.filter { $0.error != nil }.map(\.file)
@@ -204,29 +191,7 @@ public final class AppState {
 
     private func finishDecoding(files: [SessionFile]) {
         installWindows(for: files)
-        // The display window owns the images now; drop the preview bitmap
-        // so the first picture is not resident twice.
-        decodePreview = nil
         phase = .scrubbing
-    }
-
-    /// First-picture preview: surfaces the shoot's first photo as soon as
-    /// its cache JPEG lands, while the decode phase (and the input lock)
-    /// continues. No-op after decoding ends. The preview is a full-res
-    /// decode of the same cache JPEG the viewer will show, so the transition
-    /// to scrubbing is seamless.
-    func handleDecodedFile(_ file: SessionFile, cacheURL: URL) {
-        guard case .decoding = phase else { return }
-        guard decodePreview == nil, session?.files.first?.id == file.id else { return }
-        Task { [weak self] in
-            let image = await Task.detached(priority: .userInitiated) {
-                ImageWindow.loadJPEGFullRes(at: cacheURL)
-            }.value
-            // Re-check: the import may have finished (or another file won
-            // the race) while the decode was running.
-            guard let self, case .decoding = self.phase, self.decodePreview == nil else { return }
-            self.decodePreview = image
-        }
     }
 
     private func installWindows(for files: [SessionFile]) {

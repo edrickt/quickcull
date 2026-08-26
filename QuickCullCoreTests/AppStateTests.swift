@@ -590,31 +590,4 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.viewMode, .scrub) // AppState.startNewSession resets to scrub
         XCTAssertEqual(state.phase, .empty)
     }
-
-    /// Time-to-first-picture: the shoot's first photo surfaces as soon as
-    /// its cache JPEG lands, while the phase (and the input lock) is still
-    /// .decoding — the blocking guarantee is unchanged, only the first
-    /// glimpse is earlier. Single worker + slow decoder makes the window
-    /// deterministic: file 0 lands at ~300ms, files 1-2 at ~600-900ms.
-    func testFirstPicturePreviewAppearsWhileDecodingAndClearsAtScrubbing() async throws {
-        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "p\($0).cr2", in: tempDir) }
-        let state = AppState(decoder: SlowStubDecoder(delay: 300_000_000),
-                             cache: cache, trasher: StubTrasher(), decodeWorkerLimit: 1)
-        state.importFiles(urls: files)
-
-        var sawPreviewWhileDecoding = false
-        for _ in 0..<60 {
-            if state.decodePreview != nil {
-                if case .decoding = state.phase { sawPreviewWhileDecoding = true }
-                break
-            }
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-        XCTAssertTrue(sawPreviewWhileDecoding,
-                      "first picture must appear while the import is still decoding")
-        XCTAssertNotNil(state.decodePreview)
-
-        await waitForScrubbing(state)
-        XCTAssertNil(state.decodePreview, "preview must be dropped when scrubbing starts")
-    }
 }

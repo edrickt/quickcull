@@ -43,28 +43,6 @@ final class DecodeEngineTests: XCTestCase {
         XCTAssertEqual(failures.first?.error, .cannotUnpack("stub failure"))
     }
 
-    func testFileDecodedEventsPrecedeCompletedAndCarryLiveCacheURLs() async throws {
-        let files = TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"])
-        let (cache, base) = try await TestFixtures.makeTempCache()
-        defer { try? FileManager.default.removeItem(at: base) }
-        let engine = DecodeEngine(decoder: StubDecoder(), cache: cache, workerLimit: 1)
-
-        let events = await collect(engine.decodeAll(files: files))
-        let decoded = events.compactMap { event -> (SessionFile, URL)? in
-            if case .fileDecoded(let file, let url) = event { return (file, url) }
-            return nil
-        }
-        XCTAssertEqual(decoded.map { $0.0.id }, files.map(\.id),
-                       "one fileDecoded per file, in FIFO order")
-        XCTAssertTrue(decoded.allSatisfy { FileManager.default.fileExists(atPath: $0.1.path) },
-                      "the cache JPEG must already be on disk when the event fires")
-        guard case .completed(let outcomes) = events.last else {
-            return XCTFail("expected completed event")
-        }
-        XCTAssertEqual(outcomes.count, 3)
-        XCTAssertTrue(outcomes.allSatisfy { $0.error == nil })
-    }
-
     func testProgressReachesTotalAndIsMonotonic() async throws {
         let files = TestFixtures.makeFiles((0..<16).map { "img_\($0).nef" })
         let (cache, base) = try await TestFixtures.makeTempCache()
