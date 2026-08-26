@@ -170,29 +170,40 @@ public final class ImageWindow {
         }
     }
 
-    /// Main-viewer window: radius 30 — the whole ±30 sliding window decodes
-    /// at FULL resolution (no 2× screen cap). The current image and every
-    /// neighbor land as true source pixels, so the Space loupe's "100%" is
-    /// genuine 1:1 even for 45-60 MP raws, and scrubbing never waits on a
-    /// downsample. Memory is bounded by the window (at most 61 full-res
-    /// previews), not the shoot size: a 45-60 MP raw is ~135-180 MB decoded,
-    /// so a full window runs ~8-11 GB on large-sensor shoots (see README
-    /// "Memory stays flat"). Decodes share a gate so a window fill never
-    /// fires 61 parallel ~180 MB decodes at once.
+    /// Main-viewer window: full-resolution decode for the current image plus
+    /// or minus `displayFullResRadius` (default 2 → 5 images). The current
+    /// image is always full-res, so the Space loupe's "100%" is genuine
+    /// source-pixel 1:1 at any image size, and stepping within the radius is
+    /// instant. Neighbors beyond the radius fall back to the filmstrip thumb
+    /// and decode full-res on landing (~100 ms for a 20 MP cache entry).
+    ///
+    /// Deliberately NOT the ±30 full-res window: 61 full-res 20 MP bitmaps
+    /// are ~3.8 GB and thrashed swap on an 8 GB machine (measured 4.3 GB
+    /// swapped, scrub stalled to seconds per step). Radius is tunable via
+    /// `defaults write com.quickcull displayFullResRadius N` for machines
+    /// with headroom. Decodes share a gate so a fill never fires many
+    /// parallel ~100+ MB decodes at once.
     public static func display(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
-        ImageWindow(radius: 30, count: files.count) { [cache] index in
+        ImageWindow(radius: Self.displayFullResRadius, count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
             let url = try? await cache.cacheURL(for: files[index])
             guard let url else { return nil }
-            // A full-res 45 MP decode takes ~100-400 ms; run it off the main
-            // actor (detached task) and throttle it through the shared gate
-            // so a window fill decodes at most `limit` images concurrently.
+            // A full-res 20-45 MP decode takes ~100-400 ms; run it off the
+            // main actor (detached task) and throttle it through the shared
+            // gate so concurrent fills stay bounded.
             return await Task.detached(priority: .userInitiated) {
                 displayDecodeGate.acquire()
                 defer { displayDecodeGate.release() }
                 return loadJPEGFullRes(at: url)
             }.value
         }
+    }
+
+    /// Full-res radius for the main-viewer window (see `display`). Hidden
+    /// override: `defaults write com.quickcull displayFullResRadius N`.
+    nonisolated static var displayFullResRadius: Int {
+        let n = UserDefaults.standard.integer(forKey: "displayFullResRadius")
+        return n > 0 ? n : 2
     }
 
     /// Full-resolution decode of a cached JPEG: reads the JPEG's own header

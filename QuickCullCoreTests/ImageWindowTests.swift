@@ -175,4 +175,33 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertEqual(window.image(at: 0)?.width, 5000)
         XCTAssertEqual(window.image(at: 0)?.height, 2500)
     }
+
+    /// The main-viewer window is deliberately small — current ±
+    /// `displayFullResRadius` (default 2 → at most 5 full-res images). 61
+    /// full-res 20MP bitmaps are ~3.8GB and thrash swap on 8GB machines
+    /// (measured); pin the bound so a bump is a conscious knob change.
+    func testDisplayWindowKeepsFullResRadiusSmall() async throws {
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        var files: [SessionFile] = []
+        for i in 0..<10 {
+            let url = fixtureDir.appendingPathComponent("w\(i).jpg")
+            try TestFixtures.writeJPEG(color: UInt8(i), width: 64, height: 40, to: url)
+            let file = SessionFile(url: url)
+            files.append(file)
+            let bitmap = RawBitmap(image: TestFixtures.makeCGImage(width: 64, height: 40, color: UInt8(i)),
+                                   width: 64, height: 40, flip: 0)
+            _ = try await cache.storeJPEG(bitmap, for: file)
+        }
+        let radius = ImageWindow.displayFullResRadius
+        let expected = 2 * radius + 1
+        let window = ImageWindow.display(files: files, cache: cache)
+        for index in [0, 5, 9] {
+            window.setCurrent(index)
+            await window.waitUntilSettled()
+            XCTAssertLessThanOrEqual(window.images.count, expected,
+                                     "display window must not exceed current ± radius (\(expected))")
+        }
+    }
 }

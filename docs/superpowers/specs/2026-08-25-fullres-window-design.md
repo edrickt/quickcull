@@ -1,6 +1,6 @@
 # Full-Resolution Viewer Window — Design Spec
 
-Date: 2026-08-25
+Date: 2026-08-25 (rev 2: memory-bounded radius after 8GB-machine measurement)
 Status: implemented (decision supersedes the 2×-screen display cap)
 Related: `ImageWindow.swift`, `ImageDisplayView.swift` (LoupeView), `2026-08-16-quickcull-design.md` (v1 pipeline)
 
@@ -17,66 +17,76 @@ showed on large raws.
 
 The naive fix (full-res decode for the loupe) was deliberately rejected while
 it meant one extra 135-180MB decode; the display cap was the memory-flatness
-invariant. Decision (user-directed, 2026-08-25): the **whole ±30 viewer
-window** decodes at full resolution — the displayed image *is* the full-res
-pixels, so the loupe is true 1:1 with no second decode path at all.
+invariant. Rev 1 (superseded) shipped radius 30 full-res; real-machine
+measurement killed it (see "Measured reality" below).
 
 ## Change
 
-1. **`ImageWindow.display` — radius 30, full-res decode.** The main-viewer
-   window covers the same ±30 sliding window as the filmstrip and decodes
-   every image at full resolution via the new `loadJPEGFullRes(at:)`, which
-   reads the cache JPEG's own header dimensions and asks the thumbnail API
-   for exactly that long edge. No image is ever downsampled for the viewer.
+1. **`ImageWindow.display` — full-res decode, memory-bounded radius.** The
+   main-viewer window decodes at full resolution via `loadJPEGFullRes(at:)`
+   (reads the cache JPEG's own header dimensions and asks the thumbnail API
+   for exactly that long edge; nothing is ever downsampled). The radius is
+   `displayFullResRadius` — default **2** (current ±2, 5 images), tunable via
+   `defaults write com.quickcull displayFullResRadius N`.
    `displayPixelLimit()` and the 2×-screen cap are deleted.
 
-2. **Throttled fills.** A full window queues 61 full-res decodes; without a
-   bound they would fire 61 parallel ~180MB decodes. All display windows
-   share one process-wide `DecodeGate` (DispatchSemaphore, limit 3); a fill
-   decodes at most three images at once, current-first via the existing
-   `loadOrder`.
+2. **Throttled fills.** All display windows share one process-wide
+   `DecodeGate` (DispatchSemaphore, limit 3); a fill decodes at most three
+   images at once, current-first via the existing `loadOrder`.
 
 3. **Loupe — no code change, now honest.** `LoupeView.croppedImage` crops
-   the display CGImage at 1:1 backing pixels around the cursor; the display
-   image is now the full-res decode, so the crop is genuine source-pixel 1:1
-   and the "100%" badge is exact at any image size. Comments updated to
-   document the guarantee.
+   the display CGImage at 1:1 backing pixels around the cursor; the current
+   image is a full-res decode, so the crop is genuine source-pixel 1:1 and
+   the "100%" badge is exact at any image size. Comments updated.
 
-4. **Filmstrip/grid unchanged.** Thumbnails stay 320px (`thumbnails`,
-   `gridThumbnails` factories) — full-res pixels are pointless at 160-200pt
-   and would multiply window memory for no visible gain.
+4. **Neighbors beyond the radius.** They are not decoded by the display
+   window; the view falls back to the filmstrip 320px thumb and the image
+   decodes full-res on landing (~90ms at 20MP — faster than the old 3840-cap
+   path, which measured ~180ms because it full-decodes then downscales).
 
-## Memory accounting (honest numbers)
+5. **Filmstrip/grid unchanged.** 320px thumbnails (`thumbnails`,
+   `gridThumbnails` factories).
 
-Steady state is bounded by the window count (61), never by shoot size, so
-"flat with respect to file count" still holds. The absolute bound changed:
+## Measured reality (2026-08-25, 8GB Apple M1)
 
-| Source | Full-res bitmap | 61-image window |
+- Full-res decode of a 5240×3912 cache JPEG: **~90ms**. Decode speed is not
+  the bottleneck.
+- Rev 1's 61-image full-res window: 61 × ~62MB = **~3.8GB** of bitmaps.
+  Running app footprint reached **4.4GB with 4.3GB swapped** on the 8GB
+  machine; every scrub step faulted pages in/out and scrub stalled to
+  seconds per step. CoreAnimation additionally held ~26 full-res textures
+  (~2GB) for recently rendered images.
+- Conclusion: a 61-image full-res window cannot fit 8GB machines. The
+  bounded radius keeps every property that matters — loupe true 1:1,
+  instant stepping, fast landings — at ~310MB (20MP) to ~1.3GB (60MP)
+  window cost, plus the user-controlled knob for machines with headroom.
+
+## Memory accounting (radius 2, honest numbers)
+
+| Source | Full-res bitmap | 5-image window |
 | --- | --- | --- |
-| 12MP (4000×3000) | ~36MB | ~2.2GB |
-| 24MP (6000×4000) | ~72MB | ~4.4GB |
-| 45MP (8256×5504) | ~136MB | ~8.3GB |
-| 60MP (9504×6336) | ~181MB | ~11GB |
+| 12MP (4000×3000) | ~36MB | ~180MB |
+| 20MP (5240×3912) | ~62MB | ~310MB |
+| 45MP (8256×5504) | ~136MB | ~680MB |
+| 60MP (9504×6336) | ~181MB | ~900MB |
 
 Decodes are 8-bit RGB (no alpha); macOS pages bitmap memory under pressure.
-README "Memory stays flat" states the new bound explicitly.
+README "Memory stays flat" states the bound and the knob explicitly.
 
 ## Tradeoffs accepted
 
-- **Absolute memory**: a full 61-image window of large-sensor raws holds
-  8-11GB of bitmaps (previously ~39MB × 61 with the cap). Bounded, paged,
-  and only for the active session, but the README headline number changed.
-- **Window fills slower**: a cold 61-image fill takes seconds (full-res
-  decode ~100-400ms each, 3 at a time); the current image loads first, and
-  the view falls back to filmstrip thumbs until each full-res frame lands.
-- **Rebuilds re-decode**: filter changes / session start rebuild the window
-  (61 full-res decodes per rebuild). Flag toggles in All mode do *not*
-  rebuild (pinned by `testToggleFlagRebuildsWindowsOnlyWhenProjectionChanges`).
+- **Far jumps show a thumb briefly**: landing beyond ±2 falls back to the
+  320px thumb for ~90-150ms until the full-res decode lands (parity with the
+  old radius-1 design, which waited ~180ms for the 3840-cap decode).
+- **Rapid key-mash past the radius**: every 3rd step has the same ~90ms
+  hitch; raising the knob removes it at a known memory cost.
+- **Absolute memory**: the window is ~5 full-res bitmaps (~310-900MB),
+  bounded by the radius, never by shoot size. A 500-file shoot uses the same
+  memory as a 50-file one.
 
 ## Out of scope
 
-- Tile/pyramid cache for strict flat-memory loupe (rejected: ingest time +
-  disk + format change; the window-scale fix makes it unnecessary).
+- Tiled/pyramid cache (rejected: ingest time + disk + format change).
+- Memory-adaptive radius (auto-shrink under pressure) — the knob covers the
+  need; revisit only if pressure measurements demand it.
 - Persistent cache, HEIF cache format (see import-speed spec).
-- Lowering the decode gate or making it memory-aware — revisit only if
-  pressure measurements demand it.
