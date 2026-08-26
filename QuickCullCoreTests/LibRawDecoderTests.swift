@@ -39,34 +39,6 @@ final class LibRawDecoderTests: XCTestCase {
         XCTAssertThrowsError(try decoder.decodeRaw(at: URL(fileURLWithPath: "/nonexistent/photo.cr2")))
     }
 
-    /// The embedded camera JPEG (FastPreview placeholder) must come back
-    /// fast and capped (some cameras embed full-res previews, e.g. CR3)
-    /// from a real raw, without a full demosaic.
-    func testEmbeddedPreviewExtractsCameraJPEG() {
-        for (name, ext) in [("dsc0258", "arw"), ("mg_2233", "cr3")] {
-            guard let preview = LibRawDecoder.embeddedPreview(at: fixture(name, ext)) else {
-                return XCTFail("\(name).\(ext): expected an embedded preview")
-            }
-            XCTAssertGreaterThan(preview.width, 0)
-            XCTAssertLessThanOrEqual(preview.width, 2048,
-                                     "preview must be capped for placeholder use")
-        }
-    }
-
-    /// Truncated raws may still carry a readable embedded preview (that is
-    /// a feature: a broken file can still show something); a missing file
-    /// must yield nil deterministically.
-    func testEmbeddedPreviewHandlesBrokenAndMissingFiles() {
-        for (name, ext) in [("bad_truncated", "cr2"), ("bad_truncated", "raf"), ("bad_truncated", "iiq")] {
-            let preview = LibRawDecoder.embeddedPreview(at: fixture(name, ext))
-            if let preview {
-                XCTAssertLessThanOrEqual(preview.width, 2048,
-                                         "\(name).\(ext): preview must stay capped")
-            }
-        }
-        XCTAssertNil(LibRawDecoder.embeddedPreview(at: URL(fileURLWithPath: "/nonexistent/photo.cr2")))
-    }
-
     /// End-to-end orientation check: dcraw_process already rotates the raw
     /// (olympus decodes to 1926x2576 upright portrait with flip=5), so the
     /// cached JPEG must carry no orientation tag — loading it the way

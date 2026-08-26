@@ -137,23 +137,6 @@ public final class ImageWindow {
 
     public func image(at index: Int) -> CGImage? { images[index] }
 
-    /// Re-runs the loader for `index` even if an image (e.g. a `FastPreview`
-    /// placeholder) is already resident, replacing it when the loader
-    /// returns. Used when a background decode's cache JPEG lands after
-    /// progressive-scrub unlock. No-op while a load is already in flight.
-    public func retry(_ index: Int) {
-        guard index >= 0, index < count, !inFlight.contains(index) else { return }
-        inFlight.insert(index)
-        Task { [weak self] in
-            let image = await self?.loader(index)
-            guard let self else { return }
-            self.inFlight.remove(index)
-            let currentKeep = Set(self.policy.window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices)
-            guard currentKeep.contains(index) else { return }
-            if let image { self.images[index] = image }
-        }
-    }
-
     /// Awaits until all in-flight loads settle, the optional timeout
     /// expires, or the caller is cancelled (used by tests).
     public func waitUntilSettled(timeout: TimeInterval? = nil) async {
@@ -167,18 +150,15 @@ public final class ImageWindow {
 
     // MARK: App factories
 
-    /// Filmstrip window: radius 30, 320 px thumbnails. While a file is still
-    /// decoding (progressive scrub), its cache JPEG does not exist yet, so
-    /// the cell shows the fast embedded preview instead.
+    /// Filmstrip window: radius 30, 320 px thumbnails.
     public static func thumbnails(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
         ImageWindow(radius: 30, count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
-            let file = files[index]
-            let url = try? await cache.cacheURL(for: file)
+            let url = try? await cache.cacheURL(for: files[index])
             // Decode off the main actor: even a small JPEG takes tens of ms,
             // and scrubbing must never block the UI thread.
             return await Task.detached(priority: .utility) {
-                loadThumbnail(at: url, fallbackURL: file.url)
+                loadJPEG(at: url, maxPixelSize: 320)
             }.value
         }
     }
@@ -192,21 +172,11 @@ public final class ImageWindow {
         // up to count, bounded by count (full grid).
         ImageWindow(radius: files.count, count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
-            let file = files[index]
-            let url = try? await cache.cacheURL(for: file)
+            let url = try? await cache.cacheURL(for: files[index])
             return await Task.detached(priority: .utility) {
-                loadThumbnail(at: url, fallbackURL: file.url)
+                loadJPEG(at: url, maxPixelSize: 320)
             }.value
         }
-    }
-
-    /// 320 px cache-JPEG thumbnail, or the fast embedded preview when the
-    /// cache JPEG does not exist yet (file still decoding).
-    nonisolated private static func loadThumbnail(at url: URL?, fallbackURL: URL) -> CGImage? {
-        if let url, FileManager.default.fileExists(atPath: url.path) {
-            return loadJPEG(at: url, maxPixelSize: 320)
-        }
-        return FastPreview.image(for: fallbackURL)
     }
 
     /// Main-viewer window: full-resolution decode for the current image,
@@ -217,11 +187,6 @@ public final class ImageWindow {
     /// beyond it fall back to the filmstrip thumb and decode full-res on
     /// landing (~100 ms for a 20 MP cache entry). The asymmetry pre-loads
     /// the direction culling moves: more ahead than behind.
-    ///
-    /// While a file is still decoding (progressive scrub) its cache JPEG
-    /// does not exist, so the loader returns the fast embedded preview
-    /// (`FastPreview`) instead; `retry(_:)` replaces it when the decode
-    /// lands.
     ///
     /// Memory is bounded by the window (31 full-res bitmaps), never by shoot
     /// size: ~1.9 GB at 20 MP (fits 8 GB machines for typical shoots),
@@ -234,8 +199,7 @@ public final class ImageWindow {
                     ahead: Self.displayFullResAhead,
                     count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
-            let file = files[index]
-            let url = try? await cache.cacheURL(for: file)
+            let url = try? await cache.cacheURL(for: files[index])
             guard let url else { return nil }
             // A full-res 20-45 MP decode takes ~100-400 ms; run it off the
             // main actor (detached task) and throttle it through the shared
@@ -243,12 +207,7 @@ public final class ImageWindow {
             return await Task.detached(priority: .userInitiated) {
                 displayDecodeGate.acquire()
                 defer { displayDecodeGate.release() }
-                if FileManager.default.fileExists(atPath: url.path) {
-                    return loadJPEGFullRes(at: url)
-                }
-                // Still decoding: fast embedded preview as placeholder;
-                // replaced by `retry(_:)` when the real decode lands.
-                return FastPreview.image(for: file.url)
+                return loadJPEGFullRes(at: url)
             }.value
         }
     }

@@ -206,32 +206,4 @@ final class ImageWindowTests: XCTestCase {
                                      "display window must not exceed behind + 1 + ahead (\(expected))")
         }
     }
-
-    /// `retry` re-runs the loader for an index whose slot holds a nil
-    /// (or preview) placeholder, so late-arriving background decodes can
-    /// replace placeholders after progressive-scrub unlock.
-    func testRetryReplacesPlaceholder() async {
-        var callsForIndexZero = 0
-        let window = ImageWindow(radius: 1, count: 3) { index in
-            if index == 0 { callsForIndexZero += 1 }
-            return callsForIndexZero == 1 ? nil : TestFixtures.makeCGImage(width: 8, height: 8, color: 9)
-        }
-        window.setCurrent(0)
-        await window.waitUntilSettled()
-        XCTAssertNil(window.image(at: 0), "first load of index 0 is the placeholder (nil)")
-        window.retry(0)
-        await window.waitUntilSettled()
-        XCTAssertNotNil(window.image(at: 0), "retry must replace the placeholder")
-        XCTAssertEqual(callsForIndexZero, 2)
-        // retry while a load is in flight is a no-op (no double load)
-        let slow = ImageWindow(radius: 1, count: 3) { _ in
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            return TestFixtures.makeCGImage(width: 8, height: 8, color: 1)
-        }
-        slow.setCurrent(0)
-        slow.retry(0)
-        slow.retry(0)
-        await slow.waitUntilSettled()
-        XCTAssertNotNil(slow.image(at: 0))
-    }
 }
