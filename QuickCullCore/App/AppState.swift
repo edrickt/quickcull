@@ -48,16 +48,36 @@ public final class AppState {
     private let decoder: RawDecoding
     private let trasher: Trashing
     private let decodeOptions: DecodeOptions = .v1
+    /// Test seam: bounds DecodeEngine workers (nil = default memory rule).
+    private let decodeWorkerLimit: Int?
+    /// Progressive-scrub gate: once this many files are decoded, scrubbing
+    /// unlocks while the rest decode in the background (previews shown until
+    /// each decode lands).
+    private let decodeUnlockThreshold: Int
+    /// True from the progressive unlock until `.completed`; suppresses
+    /// further phase writes and enables late-decode window retries.
+    private var isBackgroundDecoding = false
 
     public init(decoder: RawDecoding = RoutingDecoder(librawDecoder: LibRawDecoder(),
                                                       imageIODecoder: ImageIODecoder()),
                 cache: ImageCacheStore = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()),
                 trasher: Trashing = FileManagerTrasher(),
-                mover: Moving = FileManagerMover()) {
+                mover: Moving = FileManagerMover(),
+                decodeWorkerLimit: Int? = nil,
+                decodeUnlockThreshold: Int? = nil) {
         self.decoder = decoder
         self.cache = cache
         self.trasher = trasher
         self.mover = mover
+        self.decodeWorkerLimit = decodeWorkerLimit
+        self.decodeUnlockThreshold = decodeUnlockThreshold ?? Self.defaultDecodeUnlockThreshold
+    }
+
+    /// Default progressive-scrub gate. Hidden override:
+    /// `defaults write com.quickcull decodeUnlockThreshold N`.
+    static var defaultDecodeUnlockThreshold: Int {
+        let n = UserDefaults.standard.integer(forKey: "decodeUnlockThreshold")
+        return n > 0 ? n : 90
     }
 
     /// Launch-time authoritative cache cleanup (leftovers from crashes
@@ -88,6 +108,7 @@ public final class AppState {
         moveFailures = []
         isMoving = false
         isLoupeActive = false
+        isBackgroundDecoding = false
         gridSelection = []
         gridAnchorID = nil
         viewMode = .scrub
@@ -150,26 +171,50 @@ public final class AppState {
         lastMoveColor = nil
         moveFailures = []
         isMoving = false
+        isBackgroundDecoding = false
         phase = .decoding(completed: 0, total: files.count)
 
-        let engine = DecodeEngine(decoder: decoder, cache: cache, options: decodeOptions)
+        let engine = DecodeEngine(decoder: decoder, cache: cache,
+                                  workerLimit: decodeWorkerLimit, options: decodeOptions)
         Task {
             for await event in await engine.decodeAll(files: files) {
                 switch event {
                 case .progress(let completed, let total):
+                    if isBackgroundDecoding {
+                        // Unlocked early; remaining progress is background
+                        // decode — keep the scrubbing state as-is.
+                        break
+                    }
                     phase = .decoding(completed: completed, total: total)
+                    // Progressive scrub: once the threshold is met, unlock
+                    // scrubbing while the rest decodes in the background.
+                    // Undecoded files show FastPreview placeholders until
+                    // their `.fileDecoded` retries land.
+                    if completed >= decodeUnlockThreshold,
+                       let session, !session.files.isEmpty {
+                        isBackgroundDecoding = true
+                        finishDecoding(files: session.files)
+                    }
+                case .fileDecoded(let file, _):
+                    // A late decode landed: replace its preview (viewer and
+                    // strip/grid) with the real cache JPEG.
+                    guard isBackgroundDecoding, let session else { break }
+                    if let index = session.files.firstIndex(where: { $0.id == file.id }) {
+                        displayImages?.retry(index)
+                        thumbWindow?.retry(index)
+                    }
                 case .completed(let outcomes):
                     importFailures = unsupportedFailures + outcomes.filter { $0.error != nil }
                     let failed = outcomes.filter { $0.error != nil }.map(\.file)
                     if !failed.isEmpty {
                         // Spec: the session proceeds without the failed files.
-                        // Flags are empty at this point, so remove() only
-                        // drops the files (and shifts the index correctly).
+                        // remove() drops the files and shifts the index.
                         session?.remove(failed)
                         if let s = session {
                             gridSelection = gridSelection.filter { s.contains(id: $0) }
                         }
                     }
+                    isBackgroundDecoding = false
                     if session?.isEmpty == true {
                         // All failed: back to the empty state; its banner
                         // surfaces the failures.
@@ -180,9 +225,14 @@ public final class AppState {
                         phase = .empty
                         viewMode = .scrub
                     } else if let session {
-                        // Loaders index into the files array, so it must be
-                        // the post-removal list.
-                        finishDecoding(files: session.files)
+                        if failed.isEmpty, phase == .scrubbing {
+                            // Progressive unlock already installed the
+                            // windows over the same files array: keep them.
+                        } else {
+                            // Loaders index into the files array, so it must
+                            // be the post-removal list.
+                            finishDecoding(files: session.files)
+                        }
                     }
                 }
             }

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 
 /// LibRaw-backed decoder: full-resolution demosaic via the C API.
 /// Stateless and thread-safe: every call creates its own libraw handle.
@@ -82,6 +83,53 @@ public final class LibRawDecoder: RawDecoding {
             }
         }
         return RawHistogram(bins: counts, luminance: luma, sensorMax: maxLevel)
+    }
+
+    /// Fast embedded camera JPEG (LibRaw thumbnail path, no full demosaic).
+    /// Used by `FastPreview` as a transient placeholder while the full
+    /// decode runs. Returns nil when the raw has no embedded preview or it
+    /// cannot be read. Thread-safe: own handle per call, like `decodeRaw`.
+    static func embeddedPreview(at url: URL) -> CGImage? {
+        guard let handle = libraw_init(0) else { return nil }
+        defer { libraw_close(handle) }
+        guard libraw_open_file(handle, url.path) == LIBRAW_SUCCESS.rawValue else { return nil }
+        guard libraw_unpack_thumb(handle) == LIBRAW_SUCCESS.rawValue else { return nil }
+        var memError: Int32 = 0
+        guard let thumb = libraw_dcraw_make_mem_thumb(handle, &memError) else { return nil }
+        defer { libraw_dcraw_clear_mem(thumb) }
+        let t = thumb.pointee
+        guard t.data_size > 0 else { return nil }
+        let dataSize = Int(t.data_size)
+        let dataPtr = withUnsafePointer(to: &thumb.pointee.data) { $0 }
+        guard let cfData = CFDataCreate(nil, dataPtr.withMemoryRebound(to: UInt8.self, capacity: dataSize) { $0 }, dataSize),
+              let provider = CGDataProvider(data: cfData) else { return nil }
+        switch t.type {
+        case LIBRAW_IMAGE_JPEG:
+            // JPEG thumbs: LibRaw leaves width/height/colors/bits zeroed —
+            // the JPEG header carries the dimensions. Some cameras embed
+            // full-resolution previews (Canon CR3), so decode capped at
+            // 2048px: fast (DCT-subsampled) and small as a placeholder.
+            guard let source = CGImageSourceCreateWithDataProvider(provider, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 2048,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        case LIBRAW_IMAGE_BITMAP:
+            // Embedded bitmap thumbnails (3-channel 8-bit, like `makeCGImage`).
+            guard t.colors == 3, t.bits == 8, t.width > 0, t.height > 0,
+                  Int(t.data_size) == Int(t.width) * Int(t.height) * 3 else { return nil }
+            return CGImage(width: Int(t.width), height: Int(t.height),
+                           bitsPerComponent: 8, bitsPerPixel: 24,
+                           bytesPerRow: Int(t.width) * 3,
+                           space: CGColorSpaceCreateDeviceRGB(),
+                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                           provider: provider, decode: nil,
+                           shouldInterpolate: false, intent: .defaultIntent)
+        default:
+            return nil
+        }
     }
 
     private func makeCGImage(from processed: UnsafeMutablePointer<libraw_processed_image_t>) throws -> CGImage {

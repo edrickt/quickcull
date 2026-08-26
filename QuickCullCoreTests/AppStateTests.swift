@@ -590,4 +590,54 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.viewMode, .scrub) // AppState.startNewSession resets to scrub
         XCTAssertEqual(state.phase, .empty)
     }
+
+    /// Progressive scrub: with a threshold of 2, the session unlocks as soon
+    /// as 2 of 3 files are decoded — while the third still decodes in the
+    /// background. Its window slot (placeholder or nil) is then populated by
+    /// the `.fileDecoded` retry, and the phase stays scrubbing at the end.
+    func testProgressiveUnlockAfterThresholdWithBackgroundDecode() async throws {
+        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "q\($0).cr2", in: tempDir) }
+        let state = AppState(decoder: SlowStubDecoder(delay: 200_000_000),
+                             cache: cache, trasher: StubTrasher(),
+                             decodeWorkerLimit: 1, decodeUnlockThreshold: 2)
+        state.importFiles(urls: files)
+
+        // Unlock: 2 of 3 decoded (file 0 at 200ms, file 1 at 400ms).
+        for _ in 0..<80 {
+            if state.phase == .scrubbing { break }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertEqual(state.phase, .scrubbing, "must unlock once the threshold is met")
+
+        // The background decode finishes (file 2 at ~600ms) and the retry
+        // populates its window slots.
+        for _ in 0..<80 {
+            if state.displayImages?.image(at: 2) != nil { break }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertNotNil(state.displayImages?.image(at: 2),
+                        "late decode must populate the display window via retry")
+        XCTAssertNotNil(state.thumbWindow?.image(at: 2),
+                        "late decode must populate the strip window via retry")
+        XCTAssertEqual(state.phase, .scrubbing, "phase must stay scrubbing at completion")
+        XCTAssertTrue(state.importFailures.isEmpty)
+    }
+
+    /// Below the threshold (small shoot), the blocking model is unchanged:
+    /// no scrubbing until every file is decoded.
+    func testSmallShootStaysFullyBlocked() async throws {
+        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "s\($0).cr2", in: tempDir) }
+        let state = AppState(decoder: SlowStubDecoder(delay: 200_000_000),
+                             cache: cache, trasher: StubTrasher(),
+                             decodeWorkerLimit: 1, decodeUnlockThreshold: 90)
+        state.importFiles(urls: files)
+
+        // At ~450ms (2 of 3 decoded) the phase must still be .decoding.
+        try? await Task.sleep(nanoseconds: 450_000_000)
+        guard case .decoding = state.phase else {
+            return XCTFail("small shoot must stay blocked until all files decode")
+        }
+        await waitForScrubbing(state)
+        XCTAssertEqual(state.phase, .scrubbing)
+    }
 }

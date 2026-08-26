@@ -16,6 +16,9 @@ HEIF and persistent-cache wins are explicitly deferred (see Out of Scope).
 ## Product Decisions (validated 2026-08-25)
 
 - Keep blocking model — option A. Progressive scrub (time-to-first-image) rejected for this iteration.
+  **Superseded 2026-08-25** by `2026-08-25-progressive-scrub-design.md`: scrubbing now unlocks once 90 files
+  are decoded (default; knob `decodeUnlockThreshold`), remaining files decode in the background, and
+  undecoded files show the camera's embedded JPEG via `FastPreview` until the real decode replaces it.
 - HEIF rejected: `ImageIO` HEVC encode is 2–4× slower than JPEG and 1.5–3× slower to decode for `ImageWindow`. File-size win does not offset CPU on modern SSDs.
 - Persistent cache rejected for this iteration (biggest repeat-import win, but changes cache lifecycle, eviction, and stale-file UX). Revisit separately.
 - Default pixels stay bit-identical until a fidelity knob is bench-proven lossless for culling (PSNR >45 dB, histogram L2 unchanged, blind A/B pass).
