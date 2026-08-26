@@ -139,4 +139,40 @@ final class ImageWindowTests: XCTestCase {
         await window.waitUntilSettled()
         XCTAssertLessThanOrEqual(window.images.count, 3)
     }
+
+    // MARK: Full-resolution display window
+
+    /// A 5000×2500 JPEG decodes at exactly its own dimensions through the
+    /// full-res path. The old `displayPixelLimit` capped the main viewer at
+    /// max(screen) × 2 (3840 on a 1080p display), which made the loupe's
+    /// "100%" a downsample for large raws; the full-res path must never
+    /// shrink an image.
+    func testLoadJPEGFullResKeepsFullDimensions() throws {
+        let url = fixtureDir.appendingPathComponent("big.jpg")
+        try TestFixtures.writeJPEG(color: 128, width: 5000, height: 2500, to: url)
+        let image = ImageWindow.loadJPEGFullRes(at: url)
+        XCTAssertEqual(image?.width, 5000)
+        XCTAssertEqual(image?.height, 2500)
+    }
+
+    /// The main-viewer window decodes cache JPEGs at full resolution: a
+    /// stored 5000×2500 bitmap comes back 5000×2500 through the whole
+    /// display chain, so the loupe's crop is true source-pixel 1:1.
+    func testDisplayWindowDecodesFullResolution() async throws {
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let fileURL = fixtureDir.appendingPathComponent("big.jpg")
+        try TestFixtures.writeJPEG(color: 128, width: 5000, height: 2500, to: fileURL)
+        let file = SessionFile(url: fileURL)
+        let bitmap = RawBitmap(image: TestFixtures.makeCGImage(width: 5000, height: 2500, color: 128),
+                               width: 5000, height: 2500, flip: 0)
+        _ = try await cache.storeJPEG(bitmap, for: file)
+
+        let window = ImageWindow.display(files: [file], cache: cache)
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+        XCTAssertEqual(window.image(at: 0)?.width, 5000)
+        XCTAssertEqual(window.image(at: 0)?.height, 2500)
+    }
 }

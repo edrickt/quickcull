@@ -8,7 +8,7 @@ See `docs/superpowers/specs/` for the full design.
 
 - **True RAW histogram, not a preview.** FastRawViewer-style linear counts taken before white balance and gamma. Each Bayer photosite counts once by color, so R is about 1/4 of pixels, G about 1/2, B about 1/4. Sensor maximum is recorded per camera (for example 4095 on CR2/NEF, 16383 on CR3). You see clipping percent, mean, and overall luminance in two 72pt log-y panels. X-Trans and Fuji super-CCD fall back to a rendered 255 histogram.
 - **Decode first, scrub without waiting.** LibRaw demosaics every RAW at full resolution, ImageIO handles JPEG, PNG and HEIC, everything lands as a q75 JPEG in the local cache. The app finishes decoding before you can scrub, so the arrow keys never stall on a decode.
-- **Memory stays flat.** The viewer keeps only the current image plus or minus 30 files, at most 61 JPEGs. The filmstrip throttles to the same window. Grid and strip share a viewport cache capped at 40 recent thumbnails. A 500-file shoot uses the same memory as a 50-file one.
+- **Memory stays flat.** The viewer keeps only the current image plus or minus 30 files — at most 61 full-resolution previews, so the Space loupe's 100% is true source-pixel 1:1 even for 45-60MP raws and every scrub lands on full-res pixels. Full-res decodes are throttled to three at a time. Memory is bounded by the window, not the shoot: a 45-60MP raw is ~135-180MB decoded, so a full 61-image window holds ~8-11GB (less for smaller files). The filmstrip and grid show 320px thumbnails, sharing a viewport cache capped at 40 recent thumbnails. A 500-file shoot uses the same memory as a 50-file one.
 - **Three ways to look.** Single shows one image fit to window. Split shows current and next side by side with an 8pt gap and no divider, and both panes share the same zoom and pan. Grid shows adaptive 160 to 200pt thumbnails, selection by file id so it survives filters, and batch flag with Z/X/C.
 - **Metadata where you need it.** A 240pt sidebar slides in without covering the image. It shows file name and path, dimensions, file size, camera and lens, ISO, aperture, shutter, focal length, date taken, exposure bias and white balance, plus the histogram above the rows.
 - **Titles under every thumb.** Each filmstrip and grid thumbnail shows the file name, single line, tail truncated, with the full name in a tooltip.
@@ -19,7 +19,7 @@ See `docs/superpowers/specs/` for the full design.
 
 1. **Select photos.** Multi-select in the file picker. Unsupported formats appear in a dismissible banner instead of quietly disappearing from the count.
 2. **Decode all.** RAWs go through LibRaw at full resolution, standard formats through ImageIO with EXIF orientation baked in. The cache holds full-resolution q75 JPEGs. Scrubbing is blocked until every file is decoded.
-3. **Scrub.** Step with the keyboard. The sliding window loads the current image first, then neighbors outward, and evicts the far edge.
+3. **Scrub.** Step with the keyboard. The sliding window loads the current image first, then neighbors outward at full resolution, and evicts the far edge. Hold `Space` at fit for the 100% loupe — genuine source-pixel 1:1 at any image size.
 4. **Flag and commit.** Tap `Z`/`X`/`C` to flag red/yellow/green, filter to `R`/`Y`/`G`/`Unflagged` if you want to review just that color, then pick Trash or Move from its dropdown and choose a color or All Flagged. Files that fail stay flagged so you can retry. `File > New Session` wipes flags and the cache and returns to the importer.
 
 ## Supported formats
@@ -37,6 +37,7 @@ Standard formats decoded with ImageIO: JPEG (JPG, JPEG), PNG, HEIC and HEIF. Ori
 | `Z` | Toggle red flag, red corner triangle; same press again clears it |
 | `X` | Toggle yellow flag; replaces red or green if one is set |
 | `C` | Toggle green flag; replaces red or yellow if one is set |
+| `Space` (hold) | 100% loupe at fit: a 280pt lens of true 1:1 source pixels that follows the cursor |
 
 Flags are exclusive: a photo can be red, yellow, green, or unflagged, never two at once. In grid, with a selection, `Z`/`X`/`C` apply to every selected id and the selection clears after.
 

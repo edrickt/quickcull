@@ -1,4 +1,3 @@
-import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -171,23 +170,49 @@ public final class ImageWindow {
         }
     }
 
-    /// Main-viewer window: radius 1, display size (2× screen long edge).
+    /// Main-viewer window: radius 30 — the whole ±30 sliding window decodes
+    /// at FULL resolution (no 2× screen cap). The current image and every
+    /// neighbor land as true source pixels, so the Space loupe's "100%" is
+    /// genuine 1:1 even for 45-60 MP raws, and scrubbing never waits on a
+    /// downsample. Memory is bounded by the window (at most 61 full-res
+    /// previews), not the shoot size: a 45-60 MP raw is ~135-180 MB decoded,
+    /// so a full window runs ~8-11 GB on large-sensor shoots (see README
+    /// "Memory stays flat"). Decodes share a gate so a window fill never
+    /// fires 61 parallel ~180 MB decodes at once.
     public static func display(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
-        let pixels = displayPixelLimit()
-        return ImageWindow(radius: 1, count: files.count) { [cache] index in
+        ImageWindow(radius: 30, count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
             let url = try? await cache.cacheURL(for: files[index])
-            // Downsampling a 45 MP cache entry takes ~100-400 ms; decode it
-            // off the main actor so the UI stays responsive while scrubbing.
+            guard let url else { return nil }
+            // A full-res 45 MP decode takes ~100-400 ms; run it off the main
+            // actor (detached task) and throttle it through the shared gate
+            // so a window fill decodes at most `limit` images concurrently.
             return await Task.detached(priority: .userInitiated) {
-                loadJPEG(at: url, maxPixelSize: pixels)
+                displayDecodeGate.acquire()
+                defer { displayDecodeGate.release() }
+                return loadJPEGFullRes(at: url)
             }.value
         }
     }
 
-    private static func displayPixelLimit() -> Int {
-        Int(max(NSScreen.main?.frame.width ?? 1920,
-                NSScreen.main?.frame.height ?? 1080) * 2)
+    /// Full-resolution decode of a cached JPEG: reads the JPEG's own header
+    /// dimensions and asks the thumbnail API for exactly that long edge, so
+    /// nothing is ever downsampled. Cache JPEGs are already upright (no EXIF
+    /// orientation tag), so `WithTransform` is a no-op kept for symmetry with
+    /// the thumbnail path. CPU-bound, so callers run it off the main actor.
+    nonisolated static func loadJPEGFullRes(at url: URL?) -> CGImage? {
+        guard let url,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Int,
+              let height = props[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0 else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(width, height),
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     /// Downsamples a cached JPEG (thumbnail API = memory-bounded). Decoding
@@ -204,3 +229,19 @@ public final class ImageWindow {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
+
+/// Bounds concurrent full-res display decodes across all `ImageWindow.display`
+/// windows. One process-wide gate so a window rebuild never starts a second
+/// parallel fill, and a fill never decodes 61 ~180 MB images at once. FIFO is
+/// approximate under contention, which is fine: `loadOrder` already queues the
+/// current image first, so it wins the gate.
+private final class DecodeGate: @unchecked Sendable {
+    private let semaphore: DispatchSemaphore
+    init(limit: Int) {
+        semaphore = DispatchSemaphore(value: max(1, limit))
+    }
+    func acquire() { semaphore.wait() }
+    func release() { semaphore.signal() }
+}
+
+private let displayDecodeGate = DecodeGate(limit: 3)

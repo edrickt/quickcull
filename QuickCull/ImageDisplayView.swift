@@ -169,6 +169,8 @@ private struct ZoomableImageView: View {
 
                 // Loupe: 100% 1:1 magnifier lens following cursor while Space held.
                 // Only at fit (scale ~1), only while hovering inside the image, not while zoomed/panned.
+                // The display window decodes at full resolution (ImageWindow.display),
+                // so the crop below is true source-pixel 1:1 at any image size.
                 if shouldShowLoupe(container: container, fitted: fitted) {
                     LoupeView(
                         cgImage: cgImage,
@@ -471,7 +473,10 @@ private struct ZoomableImageView: View {
 }
 
 /// 100% magnifier lens that follows the cursor while Space is held.
-/// Crops the displayed CGImage at 1:1 (backing-pixel aware) around the cursor's image-space coordinate.
+/// Crops the displayed CGImage at 1:1 (backing-pixel aware) around the
+/// cursor's image-space coordinate. The display CGImage is the full-res
+/// decode (ImageWindow.display has no downsample cap), so this is genuine
+/// source-pixel 1:1 — the "100%" badge is exact at any image size.
 private struct LoupeView: View {
     let cgImage: CGImage
     let hoverLocation: CGPoint
