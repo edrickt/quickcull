@@ -176,13 +176,14 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertEqual(window.image(at: 0)?.height, 2500)
     }
 
-    /// The main-viewer window never exceeds current ± `displayFullResRadius`
-    /// (default 15 → 31 full-res images at most): full-res bitmaps are the
-    /// app's biggest working set, so the window must stay bounded by the
-    /// radius, never by shoot size. A 61-image full-res window measured
-    /// 3.8GB and thrashed swap on an 8GB machine; this pins the bound so a
-    /// bump is a conscious knob change.
-    func testDisplayWindowRespectsFullResRadius() async throws {
+    /// The main-viewer window never exceeds `displayFullResBehind` +
+    /// current + `displayFullResAhead` (default 10 + 1 + 20 = 31 full-res
+    /// images at most): full-res bitmaps are the app's biggest working set,
+    /// so the window must stay bounded by the policy, never by shoot size.
+    /// A 61-image full-res window measured 3.8GB and thrashed swap on an
+    /// 8GB machine; this pins the bound so a bump is a conscious knob
+    /// change.
+    func testDisplayWindowRespectsFullResPolicy() async throws {
         let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
 
@@ -196,14 +197,13 @@ final class ImageWindowTests: XCTestCase {
                                    width: 64, height: 40, flip: 0)
             _ = try await cache.storeJPEG(bitmap, for: file)
         }
-        let radius = ImageWindow.displayFullResRadius
-        let expected = 2 * radius + 1
+        let expected = ImageWindow.displayFullResBehind + 1 + ImageWindow.displayFullResAhead
         let window = ImageWindow.display(files: files, cache: cache)
         for index in [0, 5, 9] {
             window.setCurrent(index)
             await window.waitUntilSettled()
             XCTAssertLessThanOrEqual(window.images.count, expected,
-                                     "display window must not exceed current ± radius (\(expected))")
+                                     "display window must not exceed behind + 1 + ahead (\(expected))")
         }
     }
 }

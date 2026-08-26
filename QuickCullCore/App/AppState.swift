@@ -324,8 +324,8 @@ public final class AppState {
         displayImages?.setCurrent(session.currentIndex)
         // Ensure right pane (current+1) is also in-flight when in Split and at edge
         // (radius 1 already covers current±1, but at last index right is nil; no extra work needed)
-        // Optional: if radius were tight, ensureLoaded would be called, but the
-        // display radius (current ± displayFullResRadius) suffices for the panes.
+        // Optional: if the window were tight, ensureLoaded would be called, but
+        // the display window (behind/ahead policy) suffices for the panes.
     }
 
     public func requestCommit(color: FlagColor? = nil) {

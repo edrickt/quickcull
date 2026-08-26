@@ -3,31 +3,41 @@ import Foundation
 import ImageIO
 import Observation
 
-/// Bounded in-memory window of rendered images keyed by position: current ±
-/// radius, loaded current-first by an async loader. @Observable so the UI
-/// re-renders when async loads populate `images`. One type serves both the
-/// filmstrip (radius 30, thumbnails) and the main viewer (radius 1, display
-/// size).
+/// Bounded in-memory window of rendered images keyed by position: a
+/// (possibly asymmetric) window around the current index, loaded
+/// current-first by an async loader. @Observable so the UI re-renders when
+/// async loads populate `images`. One type serves the filmstrip (radius 30,
+/// thumbnails), the grid (all thumbs) and the main viewer (asymmetric
+/// behind/ahead, full resolution).
 @MainActor
 @Observable
 public final class ImageWindow {
-    public let radius: Int
     public let count: Int
     public private(set) var images: [Int: CGImage] = [:]
 
+    private let policy: WindowPolicy
     private let loader: (Int) async -> CGImage?
     private var inFlight: Set<Int> = []
     private var currentIndex: Int = 0
 
-    public init(radius: Int, count: Int, loader: @escaping (Int) async -> CGImage?) {
-        self.radius = radius
+    /// Symmetric window: `radius` images before and after current.
+    public convenience init(radius: Int, count: Int, loader: @escaping (Int) async -> CGImage?) {
+        self.init(policy: WindowPolicy(radius: radius), count: count, loader: loader)
+    }
+
+    /// Asymmetric window: `behind` images before current, `ahead` after.
+    public convenience init(behind: Int, ahead: Int, count: Int, loader: @escaping (Int) async -> CGImage?) {
+        self.init(policy: WindowPolicy(behind: behind, ahead: ahead), count: count, loader: loader)
+    }
+
+    private init(policy: WindowPolicy, count: Int, loader: @escaping (Int) async -> CGImage?) {
+        self.policy = policy
         self.count = count
         self.loader = loader
     }
 
     public func setCurrent(_ index: Int) {
         currentIndex = min(max(index, 0), max(count - 1, 0))
-        let policy = WindowPolicy(radius: radius)
         let windowSet = Set(policy.window(around: currentIndex, count: count))
         let keep = windowSet.union(ensuredIndices)
         for i in Set(images.keys) where !keep.contains(i) {
@@ -41,7 +51,7 @@ public final class ImageWindow {
                 let image = await loader(i)
                 guard let self else { return }
                 self.inFlight.remove(i)
-                guard Set(WindowPolicy(radius: self.radius).window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices).contains(i) else { return }
+                guard Set(self.policy.window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices).contains(i) else { return }
                 if let image { self.images[i] = image }
             }
         }
@@ -60,7 +70,6 @@ public final class ImageWindow {
     private var ensuredOrder: [Int] = [] // insertion order for LRU bounding
 
     public func ensureLoaded(indices: [Int]) {
-        let policy = WindowPolicy(radius: radius)
         let windowSet = Set(policy.window(around: currentIndex, count: count))
         let validNew = indices.filter { $0 >= 0 && $0 < count }
         for idx in validNew {
@@ -87,7 +96,7 @@ public final class ImageWindow {
                 guard let self else { return }
                 self.inFlight.remove(i)
                 // Still keep if current moved but still in ensured/window
-                let currentKeep = Set(WindowPolicy(radius: self.radius).window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices)
+                let currentKeep = Set(self.policy.window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices)
                 guard currentKeep.contains(i) else { return }
                 if let image { self.images[i] = image }
             }
@@ -170,23 +179,25 @@ public final class ImageWindow {
         }
     }
 
-    /// Main-viewer window: full-resolution decode for the current image plus
-    /// or minus `displayFullResRadius` (default 15 → 31 images). The current
-    /// image is always full-res, so the Space loupe's "100%" is genuine
-    /// source-pixel 1:1 at any image size, and scrubbing within the radius
-    /// is instant. Neighbors beyond the radius fall back to the filmstrip
-    /// thumb and decode full-res on landing (~100 ms for a 20 MP cache
-    /// entry).
+    /// Main-viewer window: full-resolution decode for the current image,
+    /// `displayFullResBehind` behind and `displayFullResAhead` ahead
+    /// (defaults: −10 … +20, 31 images). The current image is always
+    /// full-res, so the Space loupe's "100%" is genuine source-pixel 1:1 at
+    /// any image size, and scrubbing within the window is instant. Images
+    /// beyond it fall back to the filmstrip thumb and decode full-res on
+    /// landing (~100 ms for a 20 MP cache entry). The asymmetry pre-loads
+    /// the direction culling moves: more ahead than behind.
     ///
-    /// Deliberately NOT the ±30 full-res window: 61 full-res 20 MP bitmaps
-    /// are ~3.8 GB and thrashed swap on an 8 GB machine (measured 4.3 GB
-    /// swapped, scrub stalled to seconds per step). ±15 keeps 31 full-res
-    /// images: ~1.9 GB at 20 MP (fits 8 GB for typical shoots), ~4.2 GB at
-    /// 45 MP (needs headroom). Radius is tunable via
-    /// `defaults write com.quickcull displayFullResRadius N`. Decodes share
-    /// a gate so a fill never fires many parallel ~100+ MB decodes at once.
+    /// Memory is bounded by the window (31 full-res bitmaps), never by shoot
+    /// size: ~1.9 GB at 20 MP (fits 8 GB machines for typical shoots),
+    /// ~4.2 GB at 45 MP (needs headroom). Both sides are tunable via
+    /// `defaults write com.quickcull displayFullResBehind N` /
+    /// `displayFullResAhead N`. Decodes share a gate so a fill never fires
+    /// many parallel ~100+ MB decodes at once.
     public static func display(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
-        ImageWindow(radius: Self.displayFullResRadius, count: files.count) { [cache] index in
+        ImageWindow(behind: Self.displayFullResBehind,
+                    ahead: Self.displayFullResAhead,
+                    count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
             let url = try? await cache.cacheURL(for: files[index])
             guard let url else { return nil }
@@ -201,11 +212,18 @@ public final class ImageWindow {
         }
     }
 
-    /// Full-res radius for the main-viewer window (see `display`). Hidden
-    /// override: `defaults write com.quickcull displayFullResRadius N`.
-    nonisolated static var displayFullResRadius: Int {
-        let n = UserDefaults.standard.integer(forKey: "displayFullResRadius")
-        return n > 0 ? n : 15
+    /// Full-res window behind the current image (see `display`). Hidden
+    /// override: `defaults write com.quickcull displayFullResBehind N`.
+    nonisolated static var displayFullResBehind: Int {
+        let n = UserDefaults.standard.integer(forKey: "displayFullResBehind")
+        return n > 0 ? n : 10
+    }
+
+    /// Full-res window ahead of the current image (see `display`). Hidden
+    /// override: `defaults write com.quickcull displayFullResAhead N`.
+    nonisolated static var displayFullResAhead: Int {
+        let n = UserDefaults.standard.integer(forKey: "displayFullResAhead")
+        return n > 0 ? n : 20
     }
 
     /// Full-resolution decode of a cached JPEG: reads the JPEG's own header
