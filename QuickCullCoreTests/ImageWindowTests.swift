@@ -176,11 +176,13 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertEqual(window.image(at: 0)?.height, 2500)
     }
 
-    /// The main-viewer window is deliberately small — current ±
-    /// `displayFullResRadius` (default 2 → at most 5 full-res images). 61
-    /// full-res 20MP bitmaps are ~3.8GB and thrash swap on 8GB machines
-    /// (measured); pin the bound so a bump is a conscious knob change.
-    func testDisplayWindowKeepsFullResRadiusSmall() async throws {
+    /// The main-viewer window never exceeds current ± `displayFullResRadius`
+    /// (default 15 → 31 full-res images at most): full-res bitmaps are the
+    /// app's biggest working set, so the window must stay bounded by the
+    /// radius, never by shoot size. A 61-image full-res window measured
+    /// 3.8GB and thrashed swap on an 8GB machine; this pins the bound so a
+    /// bump is a conscious knob change.
+    func testDisplayWindowRespectsFullResRadius() async throws {
         let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
 

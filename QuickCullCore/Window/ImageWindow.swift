@@ -171,18 +171,20 @@ public final class ImageWindow {
     }
 
     /// Main-viewer window: full-resolution decode for the current image plus
-    /// or minus `displayFullResRadius` (default 2 → 5 images). The current
+    /// or minus `displayFullResRadius` (default 15 → 31 images). The current
     /// image is always full-res, so the Space loupe's "100%" is genuine
-    /// source-pixel 1:1 at any image size, and stepping within the radius is
-    /// instant. Neighbors beyond the radius fall back to the filmstrip thumb
-    /// and decode full-res on landing (~100 ms for a 20 MP cache entry).
+    /// source-pixel 1:1 at any image size, and scrubbing within the radius
+    /// is instant. Neighbors beyond the radius fall back to the filmstrip
+    /// thumb and decode full-res on landing (~100 ms for a 20 MP cache
+    /// entry).
     ///
     /// Deliberately NOT the ±30 full-res window: 61 full-res 20 MP bitmaps
     /// are ~3.8 GB and thrashed swap on an 8 GB machine (measured 4.3 GB
-    /// swapped, scrub stalled to seconds per step). Radius is tunable via
-    /// `defaults write com.quickcull displayFullResRadius N` for machines
-    /// with headroom. Decodes share a gate so a fill never fires many
-    /// parallel ~100+ MB decodes at once.
+    /// swapped, scrub stalled to seconds per step). ±15 keeps 31 full-res
+    /// images: ~1.9 GB at 20 MP (fits 8 GB for typical shoots), ~4.2 GB at
+    /// 45 MP (needs headroom). Radius is tunable via
+    /// `defaults write com.quickcull displayFullResRadius N`. Decodes share
+    /// a gate so a fill never fires many parallel ~100+ MB decodes at once.
     public static func display(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
         ImageWindow(radius: Self.displayFullResRadius, count: files.count) { [cache] index in
             guard index >= 0, index < files.count else { return nil }
@@ -203,7 +205,7 @@ public final class ImageWindow {
     /// override: `defaults write com.quickcull displayFullResRadius N`.
     nonisolated static var displayFullResRadius: Int {
         let n = UserDefaults.standard.integer(forKey: "displayFullResRadius")
-        return n > 0 ? n : 2
+        return n > 0 ? n : 15
     }
 
     /// Full-resolution decode of a cached JPEG: reads the JPEG's own header
