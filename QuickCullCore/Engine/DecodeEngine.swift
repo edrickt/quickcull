@@ -25,6 +25,11 @@ public struct DecodeOutcome: Equatable {
 public actor DecodeEngine {
     public enum Event {
         case progress(completed: Int, total: Int)
+        /// A single file's cache JPEG has landed on disk (successful decode
+        /// only). Fired as soon as the JPEG is written, so consumers can
+        /// surface the first picture while the rest of the import continues.
+        /// Always precedes `.completed`.
+        case fileDecoded(file: SessionFile, cacheURL: URL)
         case completed([DecodeOutcome])
     }
 
@@ -124,7 +129,11 @@ public actor DecodeEngine {
                                     let bitmap = try self.decoder.decodeRaw(at: file.url, options: self.options)
                                     benchWidth = bitmap.width
                                     benchHeight = bitmap.height
-                                    try await self.cache.storeJPEG(bitmap, for: file, quality: self.options.jpegQuality)
+                                    let jpegURL = try await self.cache.storeJPEG(bitmap, for: file, quality: self.options.jpegQuality)
+                                    // Surface the ready JPEG immediately (first
+                                    // picture preview); the import is still blocked
+                                    // until `.completed`.
+                                    await reporter.reportDecoded(file: file, cacheURL: jpegURL)
                                     // Histogram sidecar is best-effort: its failure
                                     // must never fail the import.
                                     if let hist = bitmap.histogram {
@@ -184,6 +193,10 @@ actor ProgressReporter {
     func reportProgress() {
         completed += 1
         continuation.yield(.progress(completed: completed, total: total))
+    }
+
+    func reportDecoded(file: SessionFile, cacheURL: URL) {
+        continuation.yield(.fileDecoded(file: file, cacheURL: cacheURL))
     }
 }
 
