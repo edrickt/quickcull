@@ -9,6 +9,12 @@ import Observation
 /// async loads populate `images`. One type serves the filmstrip (radius 30,
 /// thumbnails), the grid (all thumbs) and the main viewer (asymmetric
 /// behind/ahead, full resolution).
+///
+/// Optional tiering: when `reducedLoader` + `upgradePolicy` are supplied,
+/// indices outside the full tier load a reduced-size placeholder (half-size
+/// decode) and are automatically re-run at full resolution once they enter
+/// the tier (i.e. when the user lands on them). This keeps full-res memory
+/// bounded by the tier while the window still pre-loads its whole extent.
 @MainActor
 @Observable
 public final class ImageWindow {
@@ -17,6 +23,12 @@ public final class ImageWindow {
 
     private let policy: WindowPolicy
     private let loader: (Int) async -> CGImage?
+    private let reducedLoader: ((Int) async -> CGImage?)?
+    /// True when `index` is outside the full tier of `current`.
+    private let upgradePolicy: ((Int, Int) -> Bool)?
+    /// Indices whose resident image is a reduced-size placeholder; the
+    /// upgrade pass re-runs them once they enter the tier.
+    private var degradedIndices: Set<Int> = []
     private var inFlight: Set<Int> = []
     private var currentIndex: Int = 0
 
@@ -30,10 +42,44 @@ public final class ImageWindow {
         self.init(policy: WindowPolicy(behind: behind, ahead: ahead), count: count, loader: loader)
     }
 
-    private init(policy: WindowPolicy, count: Int, loader: @escaping (Int) async -> CGImage?) {
+    /// Tiered window: see the type doc for `reducedLoader`/`upgradePolicy`.
+    convenience init(behind: Int, ahead: Int, count: Int,
+                     loader: @escaping (Int) async -> CGImage?,
+                     reducedLoader: @escaping (Int) async -> CGImage?,
+                     upgradePolicy: @escaping (Int, Int) -> Bool) {
+        self.init(policy: WindowPolicy(behind: behind, ahead: ahead), count: count,
+                  loader: loader, reducedLoader: reducedLoader, upgradePolicy: upgradePolicy)
+    }
+
+    private init(policy: WindowPolicy, count: Int, loader: @escaping (Int) async -> CGImage?,
+                 reducedLoader: ((Int) async -> CGImage?)? = nil,
+                 upgradePolicy: ((Int, Int) -> Bool)? = nil) {
         self.policy = policy
         self.count = count
         self.loader = loader
+        self.reducedLoader = reducedLoader
+        self.upgradePolicy = upgradePolicy
+    }
+
+    /// Queues the loader for `index` (reduced or full per the tier policy)
+    /// and publishes the result if the index is still wanted.
+    private func startLoad(_ index: Int) {
+        guard index >= 0, index < count, !inFlight.contains(index) else { return }
+        inFlight.insert(index)
+        let useReduced = reducedLoader != nil && (upgradePolicy?(index, currentIndex) ?? false)
+        if useReduced { degradedIndices.insert(index) } else { degradedIndices.remove(index) }
+        let load = useReduced ? reducedLoader! : loader
+        Task { [weak self] in
+            let image = await load(index)
+            guard let self else { return }
+            self.inFlight.remove(index)
+            let currentKeep = Set(self.policy.window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices)
+            guard currentKeep.contains(index) else {
+                self.degradedIndices.remove(index)
+                return
+            }
+            if let image { self.images[index] = image }
+        }
     }
 
     public func setCurrent(_ index: Int) {
@@ -43,16 +89,19 @@ public final class ImageWindow {
         for i in Set(images.keys) where !keep.contains(i) {
             images.removeValue(forKey: i)
             inFlight.remove(i)
+            degradedIndices.remove(i)
         }
         for i in policy.loadOrder(current: currentIndex, count: count)
         where images[i] == nil && !inFlight.contains(i) {
-            inFlight.insert(i)
-            Task { [weak self] in
-                let image = await loader(i)
-                guard let self else { return }
-                self.inFlight.remove(i)
-                guard Set(self.policy.window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices).contains(i) else { return }
-                if let image { self.images[i] = image }
+            startLoad(i)
+        }
+        // Upgrade pass: indices that entered the full tier (typically the
+        // image the user just landed on) re-run at full resolution, so the
+        // loupe is always true 1:1 even after a far jump.
+        if let upgradePolicy {
+            for i in windowSet
+            where degradedIndices.contains(i) && !upgradePolicy(i, currentIndex) && !inFlight.contains(i) {
+                startLoad(i)
             }
         }
         // Prune ensuredIndices to keep set to avoid unbounded growth.
@@ -87,19 +136,11 @@ public final class ImageWindow {
         for i in Set(images.keys) where !keep.contains(i) {
             images.removeValue(forKey: i)
             inFlight.remove(i)
+            degradedIndices.remove(i)
         }
         // Only queue the explicitly ensured indices; window already queued by setCurrent.
         for i in ensuredIndices where images[i] == nil && !inFlight.contains(i) {
-            inFlight.insert(i)
-            Task { [weak self] in
-                let image = await loader(i)
-                guard let self else { return }
-                self.inFlight.remove(i)
-                // Still keep if current moved but still in ensured/window
-                let currentKeep = Set(self.policy.window(around: self.currentIndex, count: self.count)).union(self.ensuredIndices)
-                guard currentKeep.contains(i) else { return }
-                if let image { self.images[i] = image }
-            }
+            startLoad(i)
         }
         // Prune ensuredIndices to keep set to keep memory bounded (viewport + 61).
         ensuredIndices = ensuredIndices.intersection(keep)
@@ -179,27 +220,33 @@ public final class ImageWindow {
         }
     }
 
-    /// Main-viewer window: full-resolution decode for the current image,
-    /// `displayFullResBehind` behind and `displayFullResAhead` ahead
-    /// (defaults: −10 … +20, 31 images). The current image is always
-    /// full-res, so the Space loupe's "100%" is genuine source-pixel 1:1 at
-    /// any image size, and scrubbing within the window is instant. Images
-    /// beyond it fall back to the filmstrip thumb and decode full-res on
-    /// landing (~100 ms for a 20 MP cache entry). The asymmetry pre-loads
-    /// the direction culling moves: more ahead than behind.
+    /// Main-viewer window with a full-resolution tier: the current image
+    /// plus `displayFullResBehind` behind / `displayFullResAhead` ahead
+    /// (defaults −5 … +10, 16 images) decodes at FULL resolution, so the
+    /// Space loupe's "100%" is genuine source-pixel 1:1 at any image size
+    /// and scrubbing within the tier is instant. The rest of the window
+    /// extent (`displayExtentBehind`/`displayExtentAhead`, −10 … +20) is
+    /// pre-loaded at HALF size (DCT-subsampled, ~25-70 ms and ~4× less
+    /// memory) and upgrades to full-res the moment it enters the tier —
+    /// i.e. when the user lands on it. Images beyond the extent fall back
+    /// to the filmstrip thumb and decode full-res on landing.
     ///
-    /// Memory is bounded by the window (31 full-res bitmaps), never by shoot
-    /// size: ~1.9 GB at 20 MP (fits 8 GB machines for typical shoots),
-    /// ~4.2 GB at 45 MP (needs headroom). Both sides are tunable via
+    /// Memory is bounded by the window extent, never by shoot size: 16
+    /// full-res + 15 half-size 20 MP images ≈ 1.2 GB (fits 8 GB machines
+    /// for typical shoots; ~2.3 GB at 45 MP). The tier is tunable via
     /// `defaults write com.quickcull displayFullResBehind N` /
     /// `displayFullResAhead N`. Decodes share a gate so a fill never fires
     /// many parallel ~100+ MB decodes at once.
     public static func display(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
-        ImageWindow(behind: Self.displayFullResBehind,
-                    ahead: Self.displayFullResAhead,
-                    count: files.count) { [cache] index in
+        let fullBehind = Self.displayFullResBehind
+        let fullAhead = Self.displayFullResAhead
+        return ImageWindow(behind: Self.displayExtentBehind,
+                           ahead: Self.displayExtentAhead,
+                           count: files.count,
+                           loader: { [cache] index in
             guard index >= 0, index < files.count else { return nil }
-            let url = try? await cache.cacheURL(for: files[index])
+            let file = files[index]
+            let url = try? await cache.cacheURL(for: file)
             guard let url else { return nil }
             // A full-res 20-45 MP decode takes ~100-400 ms; run it off the
             // main actor (detached task) and throttle it through the shared
@@ -207,23 +254,64 @@ public final class ImageWindow {
             return await Task.detached(priority: .userInitiated) {
                 displayDecodeGate.acquire()
                 defer { displayDecodeGate.release() }
+                guard FileManager.default.fileExists(atPath: url.path) else { return nil }
                 return loadJPEGFullRes(at: url)
             }.value
-        }
+        },
+        reducedLoader: { [cache] index in
+            guard index >= 0, index < files.count else { return nil }
+            let file = files[index]
+            let url = try? await cache.cacheURL(for: file)
+            guard let url else { return nil }
+            return await Task.detached(priority: .utility) {
+                displayDecodeGate.acquire()
+                defer { displayDecodeGate.release() }
+                guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+                return loadJPEGHalfRes(at: url)
+            }.value
+        },
+        upgradePolicy: { index, current in
+            index < current - fullBehind || index > current + fullAhead
+        })
     }
 
-    /// Full-res window behind the current image (see `display`). Hidden
+    /// Window extent kept resident for the main viewer (see `display`).
+    /// The full-res tier (knobs above) sits inside this extent; the outer
+    /// ring holds half-size placeholders.
+    nonisolated static var displayExtentBehind: Int { 10 }
+    nonisolated static var displayExtentAhead: Int { 20 }
+
+    /// Full-res tier behind the current image (see `display`). Hidden
     /// override: `defaults write com.quickcull displayFullResBehind N`.
     nonisolated static var displayFullResBehind: Int {
         let n = UserDefaults.standard.integer(forKey: "displayFullResBehind")
-        return n > 0 ? n : 10
+        return n > 0 ? n : 5
     }
 
-    /// Full-res window ahead of the current image (see `display`). Hidden
+    /// Full-res tier ahead of the current image (see `display`). Hidden
     /// override: `defaults write com.quickcull displayFullResAhead N`.
     nonisolated static var displayFullResAhead: Int {
         let n = UserDefaults.standard.integer(forKey: "displayFullResAhead")
-        return n > 0 ? n : 20
+        return n > 0 ? n : 10
+    }
+
+    /// Half-size decode of a cached JPEG: asks the thumbnail API for half
+    /// the long edge, which ImageIO serves with DCT subsampling (~25-70 ms
+    /// for a 20 MP entry vs ~144 ms full, at ~1/4 of the bitmap memory).
+    /// Used for the outer window ring; upgraded to full-res on landing.
+    nonisolated static func loadJPEGHalfRes(at url: URL?) -> CGImage? {
+        guard let url,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Int,
+              let height = props[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0 else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(width, height) / 2,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     /// Full-resolution decode of a cached JPEG: reads the JPEG's own header

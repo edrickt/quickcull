@@ -1,6 +1,6 @@
 # Full-Resolution Viewer Window — Design Spec
 
-Date: 2026-08-25 (rev 2: memory-bounded radius after 8GB-machine measurement; rev 3: default ±15; rev 4: asymmetric +20/−10 per product decision)
+Date: 2026-08-25 (rev 2: memory-bounded radius after 8GB-machine measurement; rev 3: default ±15; rev 4: asymmetric +20/−10; rev 5: full-res tier −5/+10 with half-size outer ring)
 Status: implemented (decision supersedes the 2×-screen display cap)
 Related: `ImageWindow.swift`, `ImageDisplayView.swift` (LoupeView), `2026-08-16-quickcull-design.md` (v1 pipeline)
 
@@ -22,16 +22,22 @@ measurement killed it (see "Measured reality" below).
 
 ## Change
 
-1. **`ImageWindow.display` — full-res decode, memory-bounded window.** The
-   main-viewer window decodes at full resolution via `loadJPEGFullRes(at:)`
-   (reads the cache JPEG's own header dimensions and asks the thumbnail API
-   for exactly that long edge; nothing is ever downsampled). The window is
-   asymmetric — `displayFullResBehind` (−10) and `displayFullResAhead`
-   (+20) by default, 31 images — because culling moves forward, so the
-   ahead side pre-loads more. Tunable via
+1. **`ImageWindow.display` — full-res tier + half-size ring.** The window
+   extent stays asymmetric — `displayExtentBehind` (−10) /
+   `displayExtentAhead` (+20), 31 slots. Inside it, a **full-res tier**
+   (`displayFullResBehind` −5 / `displayFullResAhead` +10 by default,
+   16 images) decodes at full resolution via `loadJPEGFullRes(at:)`; the
+   outer ring (−10…−6, +11…+20) decodes at **half size** via
+   `loadJPEGHalfRes(at:)` (ImageIO DCT subsampling: measured ~25-70ms vs
+   ~144ms full for 20MP, at ~1/4 the bitmap memory). Tier knobs:
    `defaults write com.quickcull displayFullResBehind N` /
-   `displayFullResAhead N`. `WindowPolicy` gained asymmetric
-   `behind`/`ahead` support (symmetric `init(radius:)` preserved for the
+   `displayFullResAhead N`.
+   `ImageWindow` gained a general tier mechanism (`reducedLoader` +
+   `upgradePolicy` + `degradedIndices`): indices outside the tier load the
+   reduced loader, and the **upgrade pass** in `setCurrent` re-runs them at
+   full resolution the moment they enter the tier — i.e. when the user
+   lands on them — so the loupe is always true 1:1. `WindowPolicy` keeps
+   asymmetric `behind`/`ahead` support (symmetric `init(radius:)` for the
    filmstrip/grid). `displayPixelLimit()` and the 2×-screen cap are
    deleted.
 
@@ -41,60 +47,57 @@ measurement killed it (see "Measured reality" below).
 
 3. **Loupe — no code change, now honest.** `LoupeView.croppedImage` crops
    the display CGImage at 1:1 backing pixels around the cursor; the current
-   image is a full-res decode, so the crop is genuine source-pixel 1:1 and
-   the "100%" badge is exact at any image size. Comments updated.
+   image is always full-res (in-tier by construction, upgraded on landing),
+   so the crop is genuine source-pixel 1:1 and the "100%" badge is exact at
+   any image size. Comments updated.
 
 4. **Neighbors beyond the window.** They are not decoded by the display
    window; the view falls back to the filmstrip 320px thumb and the image
-   decodes full-res on landing (~90ms at 20MP — faster than the old 3840-cap
-   path, which measured ~180ms because it full-decodes then downscales).
+   decodes full-res on landing (~90-150ms at 20MP).
 
 5. **Filmstrip/grid unchanged.** 320px thumbnails (`thumbnails`,
    `gridThumbnails` factories).
 
 ## Measured reality (2026-08-25, 8GB Apple M1)
 
-- Full-res decode of a 5240×3912 cache JPEG: **~90ms**. Decode speed is not
-  the bottleneck.
+- Full-res decode of a 5240×3912 cache JPEG: **~144ms**; half-size via
+  `maxPixelSize = max(w,h)/2` (true DCT subsample): **~25-70ms** at exactly
+  half dimensions. (Rounded-up sizes like 2620 on a 4912-wide image miss
+  the DCT boundary and fall back to full decode — use the exact half.)
 - Rev 1's 61-image full-res window: 61 × ~62MB = **~3.8GB** of bitmaps.
   Running app footprint reached **4.4GB with 4.3GB swapped** on the 8GB
   machine; every scrub step faulted pages in/out and scrub stalled to
-  seconds per step. CoreAnimation additionally held ~26 full-res textures
-  (~2GB) for recently rendered images.
-- Conclusion: a 61-image full-res window cannot fit 8GB machines. The
-  bounded window keeps every property that matters — loupe true 1:1,
-  instant scrubbing — at a cost the machine can bear: +20/−10 is
-  ~1.9GB at 20MP and ~4.2GB at 45MP, with user-controlled knobs for
-  headroom or pressure.
+  seconds per step.
+- Conclusion: full-res memory must stay bounded; the tier keeps the loupe
+  true 1:1 and near-instant scrubbing while the ring sits at half size.
 
-## Memory accounting (+20/−10, honest numbers)
+## Memory accounting (tier −5/+10, extent −10/+20, honest numbers)
 
-| Source | Full-res bitmap | 31-image window |
-| --- | --- | --- |
-| 12MP (4000×3000) | ~36MB | ~1.1GB |
-| 20MP (5240×3912) | ~62MB | ~1.9GB |
-| 45MP (8256×5504) | ~136MB | ~4.2GB |
-| 60MP (9504×6336) | ~181MB | ~5.6GB |
+| Source | Full-res bitmap | Half-size bitmap | Tier (16) + ring (15) |
+| --- | --- | --- | --- |
+| 12MP (4000×3000) | ~36MB | ~9MB | ~710MB |
+| 20MP (5240×3912) | ~62MB | ~15.5MB | ~1.2GB |
+| 45MP (8256×5504) | ~136MB | ~34MB | ~2.7GB |
+| 60MP (9504×6336) | ~181MB | ~45MB | ~3.6GB |
 
 Decodes are 8-bit RGB (no alpha); macOS pages bitmap memory under pressure.
 README "Memory stays flat" states the bound and the knobs explicitly.
-+20/−10 was chosen as the product compromise: instant scrubbing across a
-wide forward neighborhood (~1.9GB at 20MP, fits 8GB machines for typical
-shoots) while keeping 45MP+ shoots at ~4.2GB — usable with headroom,
-tunable via the knobs if pressure shows up.
+Full-res images the user has visited linger (full tier + trailing
+stragglers) until they slide out of the window extent.
 
 ## Tradeoffs accepted
 
-- **Far jumps show a thumb briefly**: landing beyond the window falls back
-  to the 320px thumb for ~90-150ms until the full-res decode lands (parity
-  with the old radius-1 design, which waited ~180ms for the 3840-cap
-  decode).
-- **Scrubbing backward hits the shorter side**: −10 behind means a rapid
-  backward mash hits the window edge after 10 steps (a ~90ms hitch per
-  crossing); forward gets 20 steps. Both sides are knob-adjustable.
-- **Absolute memory**: the window is ~31 full-res bitmaps (~1.1-5.6GB),
-  bounded by the policy, never by shoot size. A 500-file shoot uses the
-  same memory as a 50-file one.
+- **Landing on the ring shows half-size briefly**: a ring index is shown at
+  half resolution until its full-res upgrade lands (~150ms); the loupe
+  during that window is transiently half-res.
+- **Far jumps show a thumb briefly**: landing beyond the window extent falls
+  back to the 320px thumb for ~90-150ms until the full-res decode lands.
+- **Scrubbing backward hits the shorter side**: −5 behind means a rapid
+  backward mash hits the tier edge after 5 steps (full-res decode on
+  landing per step); forward gets 10. Both sides are knob-adjustable.
+- **Absolute memory**: bounded by the window extent (16 full + 15 half),
+  never by shoot size. A 500-file shoot uses the same memory as a 50-file
+  one.
 
 ## Out of scope
 

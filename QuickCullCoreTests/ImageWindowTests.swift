@@ -176,13 +176,11 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertEqual(window.image(at: 0)?.height, 2500)
     }
 
-    /// The main-viewer window never exceeds `displayFullResBehind` +
-    /// current + `displayFullResAhead` (default 10 + 1 + 20 = 31 full-res
-    /// images at most): full-res bitmaps are the app's biggest working set,
-    /// so the window must stay bounded by the policy, never by shoot size.
-    /// A 61-image full-res window measured 3.8GB and thrashed swap on an
-    /// 8GB machine; this pins the bound so a bump is a conscious knob
-    /// change.
+    /// The main-viewer window never exceeds `displayExtentBehind` +
+    /// current + `displayExtentAhead` (default 10 + 1 + 20 = 31 images at
+    /// most — the full-res tier sits inside this extent, the outer ring is
+    /// half-size): full-res bitmaps are the app's biggest working set, so
+    /// the window must stay bounded by the policy, never by shoot size.
     func testDisplayWindowRespectsFullResPolicy() async throws {
         let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
@@ -197,13 +195,69 @@ final class ImageWindowTests: XCTestCase {
                                    width: 64, height: 40, flip: 0)
             _ = try await cache.storeJPEG(bitmap, for: file)
         }
-        let expected = ImageWindow.displayFullResBehind + 1 + ImageWindow.displayFullResAhead
+        let expected = ImageWindow.displayExtentBehind + 1 + ImageWindow.displayExtentAhead
         let window = ImageWindow.display(files: files, cache: cache)
         for index in [0, 5, 9] {
             window.setCurrent(index)
             await window.waitUntilSettled()
             XCTAssertLessThanOrEqual(window.images.count, expected,
-                                     "display window must not exceed behind + 1 + ahead (\(expected))")
+                                     "display window must not exceed extent + 1 (\(expected))")
         }
+    }
+
+    /// Tiered windows: indices outside the full tier load the reduced
+    /// loader, and entering the tier (landing on the index) upgrades it to
+    /// the full loader automatically.
+    func testTieredWindowLoadsReducedOutsideTierAndUpgradesWhenCurrent() async {
+        let full = TestFixtures.makeCGImage(width: 64, height: 64, color: 1)
+        let reduced = TestFixtures.makeCGImage(width: 32, height: 32, color: 2)
+        let window = ImageWindow(behind: 3, ahead: 3, count: 10,
+                                 loader: { _ in full },
+                                 reducedLoader: { _ in reduced },
+                                 upgradePolicy: { index, current in abs(index - current) > 1 })
+        window.setCurrent(5)   // window [2,8]; full tier [4,6]
+        await window.waitUntilSettled()
+        XCTAssertEqual(window.image(at: 5)?.width, 64, "current is full-res")
+        XCTAssertEqual(window.image(at: 4)?.width, 64, "tier edge is full-res")
+        XCTAssertEqual(window.image(at: 2)?.width, 32, "out-of-tier index loads reduced")
+        XCTAssertEqual(window.image(at: 8)?.width, 32, "out-of-tier index loads reduced")
+
+        window.setCurrent(2)   // 2 enters the tier → upgrade pass
+        await window.waitUntilSettled()
+        XCTAssertEqual(window.image(at: 2)?.width, 64, "landing must upgrade to full-res")
+    }
+
+    /// The display factory tiers its window: within the full-res tier the
+    /// cache JPEG decodes at full dimensions, the outer ring at half; a
+    /// ring index upgrades to full-res once it becomes current.
+    func testDisplayWindowTiersFullAndHalfRes() async throws {
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        var files: [SessionFile] = []
+        for i in 0..<25 {
+            let url = fixtureDir.appendingPathComponent("t\(i).jpg")
+            try TestFixtures.writeJPEG(color: UInt8(i), width: 64, height: 40, to: url)
+            let file = SessionFile(url: url)
+            files.append(file)
+            let bitmap = RawBitmap(image: TestFixtures.makeCGImage(width: 64, height: 40, color: UInt8(i)),
+                                   width: 64, height: 40, flip: 0)
+            _ = try await cache.storeJPEG(bitmap, for: file)
+        }
+        let behind = ImageWindow.displayFullResBehind
+        let ahead = ImageWindow.displayFullResAhead
+        let center = 12
+        let ringAhead = center + ahead + 1
+
+        let window = ImageWindow.display(files: files, cache: cache)
+        window.setCurrent(center)
+        await window.waitUntilSettled()
+        XCTAssertEqual(window.image(at: center)?.width, 64, "current is full-res")
+        XCTAssertEqual(window.image(at: center - behind)?.width, 64, "tier edge is full-res")
+        XCTAssertEqual(window.image(at: ringAhead)?.width, 32, "outer ring is half-size")
+
+        window.setCurrent(ringAhead)   // land on the ring
+        await window.waitUntilSettled()
+        XCTAssertEqual(window.image(at: ringAhead)?.width, 64, "landing upgrades the ring to full-res")
     }
 }
