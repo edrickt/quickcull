@@ -11,6 +11,12 @@ public final class Session {
     public private(set) var files: [SessionFile]
     public private(set) var currentIndex: Int = 0
     public private(set) var flags: [String: FlagColor] = [:]
+    /// Monotonic revision bumped on every flag mutation. The filmstrip keys
+    /// its cells by id + revision, so a flag change re-keys the strip from
+    /// the final state (a preempted render pass can't leave stale badges)
+    /// at O(1) cost — previously the strip sorted and joined every flagged
+    /// id on each render.
+    public private(set) var flagRevision: Int = 0
     public var flagged: Set<String> { Set(flags.keys) }
     public func flagColor(for file: SessionFile) -> FlagColor? { flags[file.id] }
     public func flagColor(for id: String) -> FlagColor? { flags[id] }
@@ -31,11 +37,20 @@ public final class Session {
     /// The full post-commit file list; `files` is its projection under
     /// `filter`. Nothing outside Session touches this.
     public private(set) var allFiles: [SessionFile]
+    /// id → position in `allFiles`. Rebuilt whenever `allFiles` changes
+    /// (init/remove); `position`, `nearestMatchIndex`, `remove` and
+    /// `toggleFlags` read it for O(1) lookups instead of linear scans.
+    private var idPositions: [String: Int] = [:]
 
     public init(files: [SessionFile]) {
         precondition(!files.isEmpty, "Session requires at least one file")
         self.files = files
         self.allFiles = files
+        rebuildIDPositions()
+    }
+
+    private func rebuildIDPositions() {
+        idPositions = Dictionary(uniqueKeysWithValues: allFiles.enumerated().map { ($0.element.id, $0.offset) })
     }
 
     public var count: Int { files.count }
@@ -80,7 +95,7 @@ public final class Session {
     /// Position of `file` in the full list (order-preserving projection
     /// invariant: `files` is always a subsequence of `allFiles`).
     private func position(of file: SessionFile) -> Int {
-        allFiles.firstIndex(where: { $0.id == file.id }) ?? 0
+        idPositions[file.id] ?? 0
     }
 
     /// Switches the visible sequence to `filter`. The current photo stays
@@ -115,7 +130,7 @@ public final class Session {
     /// called when `currentID` is NOT in `newFiles`, so the anchor is the
     /// current photo's position in `allFiles` (it always exists there).
     private func nearestMatchIndex(to currentID: String, in newFiles: [SessionFile]) -> Int {
-        let currentPos = allFiles.firstIndex(where: { $0.id == currentID }) ?? 0
+        let currentPos = idPositions[currentID] ?? 0
         var best = 0
         var bestDistance = Int.max
         for (i, file) in newFiles.enumerated() {
@@ -141,6 +156,7 @@ public final class Session {
         guard !files.isEmpty else { return false }
         let id = currentFile.id
         if flags[id] == color { flags.removeValue(forKey: id) } else { flags[id] = color }
+        flagRevision += 1
         guard filter != .all else { return false }
         let newFiles = projection(for: filter)
         if newFiles.isEmpty {
@@ -166,7 +182,7 @@ public final class Session {
     @discardableResult
     public func toggleFlags(ids: Set<String>, color: FlagColor) -> Bool {
         guard !allFiles.isEmpty, !ids.isEmpty else { return false }
-        let validIDs = ids.intersection(allFiles.map(\.id))
+        let validIDs = Set(ids.filter { idPositions[$0] != nil })
         guard !validIDs.isEmpty else { return false }
         let beforeCount = files.count
         let beforeFilter = filter
@@ -174,6 +190,7 @@ public final class Session {
         for id in validIDs {
             if flags[id] == color { flags.removeValue(forKey: id) } else { flags[id] = color }
         }
+        flagRevision += 1
         let newFiles = projection(for: filter)
         if newFiles.isEmpty {
             filter = .all
@@ -216,15 +233,21 @@ public final class Session {
     public func remove(_ filesToRemove: [SessionFile]) {
         guard !allFiles.isEmpty else { return }
         let ids = Set(filesToRemove.map(\.id))
-        let original = allFiles
         let currentPos: Int
         if !files.isEmpty {
-            currentPos = original.firstIndex(where: { $0.id == currentFile.id }) ?? 0
+            currentPos = idPositions[currentFile.id] ?? 0
         } else {
             currentPos = 0
         }
         for id in ids { flags.removeValue(forKey: id) }
+        flagRevision += 1
+        // Positions in the ORIGINAL full list: `idPositions` is still the
+        // pre-removal id → position map here. The projection preserves
+        // full-list order, and `files` is a subsequence of `allFiles` at
+        // every point.
+        let originalPositions = idPositions
         allFiles.removeAll { ids.contains($0.id) }
+        rebuildIDPositions()
         files = projection(for: filter)
         guard !files.isEmpty else {
             currentIndex = 0
@@ -236,10 +259,7 @@ public final class Session {
         }
         // First survivor at or after the old current position (today's
         // index-shift semantics, generalized to the projection); else the
-        // last survivor. Positions are the ORIGINAL full-list ones: the
-        // projection preserves full-list order, and `files` is a
-        // subsequence of `allFiles` at every point.
-        let originalPositions = Dictionary(uniqueKeysWithValues: original.enumerated().map { ($0.element.id, $0.offset) })
+        // last survivor.
         if let survivor = files.first(where: { (originalPositions[$0.id] ?? 0) >= currentPos }),
            let idx = files.firstIndex(where: { $0.id == survivor.id }) {
             currentIndex = idx

@@ -67,29 +67,37 @@ decode-option changes. The 176-test suite is the safety net.
 
 - **`Session.flagRevision`**: monotonic counter bumped on every flag
   mutation (`toggleFlag`, `toggleFlags`, `remove`), unchanged on
-  `move`/`setIndex`. `FilmstripView.stripKey` becomes
-  `id + "#\(flagRevision)"` — O(n log n) sort+join of all flagged ids per
-  scrub step becomes O(1). The full re-key strategy is preserved; only the
-  version source changes.
+  `move`/`setIndex`/`setFilter`. `FilmstripView.stripKey` becomes
+  `id#flagRevision#currentIndex` — O(n log n) sort+join of all flagged ids
+  per scrub step becomes O(1). The full re-key strategy is preserved,
+  including the deliberate index-in-key behavior (an index change re-keys
+  the whole strip, guarding the highlight border against dropped in-place
+  updates); only the version source changes.
 - **ThumbnailCell** receives `image`/`isCurrent` as plain values from the
   parent element list (GridView pattern) — removes per-cell observation of
   `thumbWindow.images` and `session.currentIndex` (every visible strip cell
-  re-rendered on each thumbnail arrival / index change).
-- **Session**: id→position dictionary in `nearestMatchIndex` and `remove`
-  (O(n²) → O(n)); `toggleFlags` intersects against a Set (no full-id array
-  allocation).
-- **MetadataHUDView**: histogram means/clipping computed once per value,
-  not per render.
+  re-rendered on each thumbnail arrival / index change). The unused
+  `hasImage` element field is gone.
+- **Session**: `idPositions` (id → position in `allFiles`, rebuilt on
+  init/remove) serves `position`, `nearestMatchIndex`, `remove` and
+  `toggleFlags` — O(n²) filter-fallback lookups become O(n), and `remove`
+  no longer rebuilds a positions dictionary per call. `toggleFlags`
+  intersects against the map instead of allocating a full id array.
+- **MetadataHUDView**: histogram means/clipping computed once per value
+  (`HistogramStats`), not per render.
 - **LibRawDecoder.rawHistogram**: 2×2 Bayer channel LUT derived from
   `filters` outside the pixel loop.
 
 ## Wave 4 — Hardening
 
-- `AppState` stores the import decode `Task` and cancels it at the top of
-  `startNewSession()`/`importFiles()` — a stale decode stream can no longer
-  write phase/windows if a second import ever becomes reachable.
-- New tests: `flagRevision` bumps on flag mutations, unchanged on moves.
-- Final verification: full suite green + `xcodebuild -scheme QuickCull build`.
+- `AppState` stores the import decode `Task` (`importTask`) and cancels it
+  at the top of `startNewSession()`/`importFiles()`, and the stream loop
+  breaks on cancellation — a stale decode stream can no longer write
+  phase/windows if a second import ever becomes reachable. DecodeEngine's
+  existing `onTermination` cancellation chains through.
+- New tests (`FlagRevisionTests`, 6): revision starts at 0, bumps once per
+  flag mutation (single/batch/remove), never on move/setIndex/setFilter;
+  idPositions rebuilt after remove. Suite total 182.
 
 ## Sequencing
 

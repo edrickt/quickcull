@@ -70,11 +70,22 @@ public final class LibRawDecoder: RawDecoding {
         let maxLevel = Int(handle.pointee.color.maximum != 0 ? handle.pointee.color.maximum : 16383)
         var counts = [[Int]](repeating: [Int](repeating: 0, count: RawHistogram.binCount), count: 3)
         var luma = [Int](repeating: 0, count: RawHistogram.binCount)
+        // Bayer channel per (row, col) parity from the filters word: the
+        // per-pixel shift is `filters >> ((rowParity << 1 | colParity) << 1)
+        // & 3`, so the 2×2 LUT replaces two shifts + mask per pixel with one
+        // lookup. Channel 3 (second green) counts as green (1).
+        var channelLUT = [[Int]](repeating: [Int](repeating: 0, count: 2), count: 2)
+        for rowParity in 0..<2 {
+            for colParity in 0..<2 {
+                let c = Int((filters >> ((rowParity << 1 | colParity) << 1)) & 3)
+                channelLUT[rowParity][colParity] = c == 3 ? 1 : c
+            }
+        }
         for row in 0..<h {
             let rowOffset = (row + top) * rawW
+            let rowLUT = channelLUT[(row + top) & 1]
             for col in 0..<w {
-                let c = Int((filters >> (((((row + top) & 1) << 1 | ((col + left) & 1)) << 1)) & 3))
-                let channel = c == 3 ? 1 : c
+                let channel = rowLUT[(col + left) & 1]
                 let v = Int(ptr[rowOffset + col + left])
                 let bin = min(RawHistogram.binCount - 1, max(0, (v * (RawHistogram.binCount - 1)) / maxLevel))
                 counts[channel][bin] += 1

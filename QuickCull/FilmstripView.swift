@@ -3,14 +3,16 @@ import QuickCullCore
 
 /// Cell identity key for the filmstrip.
 ///
-/// The key includes the FULL flag state (every flagged id plus the current
-/// index), not just this cell's own flag: a flag or index change re-keys
-/// the whole strip, so the render pass after a burst of changes re-creates
+/// The key includes the session's flag revision (bumped on every flag
+/// mutation) AND the current index — a flag or index change re-keys the
+/// whole strip, so the render pass after a burst of changes re-creates
 /// every cell from the final state. Cell updates that a preempted render
-/// pass dropped (badges stuck absent under rapid flag toggling) cannot
-/// survive: the next pass re-creates the affected cells from scratch.
-private func stripKey(_ file: SessionFile, flagVersion: String) -> String {
-    file.id + "#" + flagVersion
+/// pass dropped (badges or the highlight border stuck absent/stale under
+/// rapid flag toggling or scrubbing) cannot survive: the next pass
+/// re-creates the affected cells from scratch. Building the key is O(1)
+/// (was: sorting and joining every flagged id per render).
+private func stripKey(_ file: SessionFile, flagRevision: Int, currentIndex: Int) -> String {
+    file.id + "#" + String(flagRevision) + "#" + String(currentIndex)
 }
 
 struct FilmstripView: View {
@@ -36,13 +38,14 @@ struct FilmstripView: View {
         // Track which thumbnails have loaded: a badge must wait for its
         // photo — it belongs to the image, not to the placeholder box.
         let loadedImages = appState.thumbWindow?.images ?? [:]
-        let flagVersion = flags.map { "\($0.key):\($0.value.rawValue)" }.sorted().joined(separator: ",") + "|\(currentIndex)"
+        let flagRevision = appState.session?.flagRevision ?? 0
         let elements = files.enumerated().map { index, file in
-            (key: stripKey(file, flagVersion: flagVersion),
+            (key: stripKey(file, flagRevision: flagRevision, currentIndex: currentIndex),
              index: index,
              file: file,
              flagColor: flags[file.id],
-             hasImage: loadedImages[index] != nil)
+             image: loadedImages[index],
+             isCurrent: index == currentIndex)
         }
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
@@ -53,7 +56,9 @@ struct FilmstripView: View {
                     // re-render a surviving cell with a stale range index and
                     // trap on files[index] (crash).
                     ForEach(elements, id: \.key) { element in
-                        ThumbnailCell(index: element.index, file: element.file, flagColor: element.flagColor)
+                        ThumbnailCell(index: element.index, file: element.file,
+                                      flagColor: element.flagColor,
+                                      image: element.image, isCurrent: element.isCurrent)
                     }
                 }
                 .padding(6)
@@ -64,12 +69,12 @@ struct FilmstripView: View {
                 // scrollTo must target the ForEach's identity (the strip
                 // key), not the integer index: cells are keyed by file id so
                 // a commit-shrunk session can't re-render a stale index
-                // (crash), and the key carries the current flag state.
+                // (crash), and the key carries the flag revision.
                 guard let session = appState.session,
                       session.files.indices.contains(session.currentIndex) else { return }
                 let file = session.files[session.currentIndex]
-                let version = session.flags.map { "\($0.key):\($0.value.rawValue)" }.sorted().joined(separator: ",") + "|\(session.currentIndex)"
-                let key = stripKey(file, flagVersion: version)
+                let key = stripKey(file, flagRevision: session.flagRevision,
+                                   currentIndex: session.currentIndex)
                 let now = Date()
                 let scrubbing = now.timeIntervalSince(lastScrollAt) < 0.15
                 lastScrollAt = now
@@ -90,19 +95,21 @@ struct ThumbnailCell: View {
     let index: Int
     let file: SessionFile
     let flagColor: FlagColor?
+    let image: CGImage?
+    let isCurrent: Bool
     @Environment(AppState.self) private var appState
 
     var body: some View {
         VStack(spacing: 3) {
             BadgedThumbnailView(
-                image: appState.thumbWindow?.image(at: index),
+                image: image,
                 flagColor: flagColor,
                 size: CGSize(width: 100, height: 64),
                 badgeSize: 24
             )
             .overlay(
                 Rectangle().strokeBorder(
-                    index == appState.session?.currentIndex ? Color.accentColor : .clear,
+                    isCurrent ? Color.accentColor : .clear,
                     lineWidth: 2)
             )
             Text(file.url.lastPathComponent)

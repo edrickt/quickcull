@@ -48,6 +48,12 @@ public final class AppState {
     private let decoder: RawDecoding
     private let trasher: Trashing
     private let decodeOptions: DecodeOptions = .v1
+    /// The in-flight import decode stream. Cancelled before a new import or
+    /// new session starts so a stale stream can never write phase/windows
+    /// over newer state. A finished task left here is harmless (cancelling
+    /// it is a no-op); no UI path re-imports while one runs today, but the
+    /// guard keeps that invariant local instead of incidental.
+    private var importTask: Task<Void, Never>?
 
     public init(decoder: RawDecoding = RoutingDecoder(librawDecoder: LibRawDecoder(),
                                                       imageIODecoder: ImageIODecoder()),
@@ -96,6 +102,7 @@ public final class AppState {
     /// Always confirmed by ScrubView, so no flag-count guard here.
     @MainActor
     public func startNewSession() {
+        importTask?.cancel()
         Task { try? await cache.wipe() }
         transitionToEmptySession()
         resetTransientState()
@@ -149,8 +156,10 @@ public final class AppState {
         phase = .decoding(completed: 0, total: files.count)
 
         let engine = DecodeEngine(decoder: decoder, cache: cache, options: decodeOptions)
-        Task {
+        importTask?.cancel()
+        importTask = Task {
             for await event in await engine.decodeAll(files: files) {
+                if Task.isCancelled { break }
                 switch event {
                 case .progress(let completed, let total):
                     phase = .decoding(completed: completed, total: total)
