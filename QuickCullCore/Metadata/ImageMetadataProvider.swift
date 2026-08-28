@@ -19,6 +19,16 @@ public struct ImageMetadata: Equatable, Sendable {
 }
 
 public enum ImageMetadataProvider {
+    /// EXIF DateTimeOriginal parser. Cached: metadata() runs per file and
+    /// DateFormatter allocation is expensive. Thread-safe per Foundation's
+    /// NSDateFormatter guarantee (macOS 10.9+).
+    private static let exifDateParser: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        return fmt
+    }()
+
     /// - Parameter cacheJPEGURL: URL of the file's decoded cache JPEG
     ///   (full-res, orientation baked in). The displayed `cgImage` is often a
     ///   320px thumbnail or a screen-limited downsample, so its dimensions
@@ -29,9 +39,8 @@ public enum ImageMetadataProvider {
         // Dimensions: decoded cache JPEG → source file props → displayed
         // CGImage (last resort only; see `cacheJPEGURL` doc).
         var dimensions: String?
-        if let cacheJPEGURL,
-           let dims = Self.pixelDimensions(at: cacheJPEGURL) {
-            dimensions = dims
+        if let cacheJPEGURL {
+            dimensions = pixelDimensions(at: cacheJPEGURL)
         }
         // File size
         var fileSize: String?
@@ -53,21 +62,7 @@ public enum ImageMetadataProvider {
         if let source = CGImageSourceCreateWithURL(file.url as CFURL, nil),
            let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] {
             if dimensions == nil {
-                var w: Int?
-                var h: Int?
-                if let v = props[kCGImagePropertyPixelWidth] as? Int {
-                    w = v
-                } else if let v = props[kCGImagePropertyPixelWidth] as? NSNumber {
-                    w = v.intValue
-                }
-                if let v = props[kCGImagePropertyPixelHeight] as? Int {
-                    h = v
-                } else if let v = props[kCGImagePropertyPixelHeight] as? NSNumber {
-                    h = v.intValue
-                }
-                if let w, let h, w > 0, h > 0 {
-                    dimensions = "\(w)×\(h)"
-                }
+                dimensions = pixelDimensions(props)
             }
             if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
                 let make = tiff[kCGImagePropertyTIFFMake] as? String
@@ -113,28 +108,20 @@ public enum ImageMetadataProvider {
                     whiteBalance = wb.intValue == 0 ? "Auto" : "Manual"
                 }
                 if let dateStr = exif[kCGImagePropertyExifDateTimeOriginal] as? String {
-                    let fmt = DateFormatter()
-                    fmt.dateFormat = "yyyy:MM:dd HH:mm:ss"
-                    fmt.locale = Locale(identifier: "en_US_POSIX")
-                    if let d = fmt.date(from: dateStr) {
+                    if let d = exifDateParser.date(from: dateStr) {
                         dateTaken = DateFormatter.localizedString(from: d, dateStyle: .medium, timeStyle: .short)
                     } else {
                         dateTaken = dateStr
                     }
                 }
             }
-            if dateTaken == nil,
-               let attrs = try? FileManager.default.attributesOfItem(atPath: file.url.path),
-               let cdate = attrs[.creationDate] as? Date {
-                dateTaken = DateFormatter.localizedString(from: cdate, dateStyle: .medium, timeStyle: .short)
-            }
         }
-        // Fallback dateTaken even if CGImageSource failed (e.g., unsupported raw) — file creation date
+        // Fallback dateTaken (runs whether or not the CGImageSource opened —
+        // e.g., unsupported raw) — file creation date. EXIF date always
+        // outranks it.
         if dateTaken == nil,
            let attrs = try? FileManager.default.attributesOfItem(atPath: file.url.path),
            let cdate = attrs[.creationDate] as? Date {
-            // Only set if file exists and we haven't already tried; for missing file attrs fails -> nil
-            // Avoid overriding EXIF date; this is second-chance fallback
             dateTaken = DateFormatter.localizedString(from: cdate, dateStyle: .medium, timeStyle: .short)
         }
         // Last resort: the displayed image itself. This is what the user sees
@@ -161,7 +148,7 @@ public enum ImageMetadataProvider {
         )
     }
 
-    /// Reads "WxH" from an image file's own properties (header only, no
+    /// Reads "W×H" from an image file's own properties (header only, no
     /// pixel decode). The cache JPEG is written from the full-res decode
     /// with orientation baked in, so its dimensions are the file's true
     /// resolution.
@@ -170,18 +157,16 @@ public enum ImageMetadataProvider {
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
             return nil
         }
-        var w: Int?
-        var h: Int?
-        if let v = props[kCGImagePropertyPixelWidth] as? Int {
-            w = v
-        } else if let v = props[kCGImagePropertyPixelWidth] as? NSNumber {
-            w = v.intValue
-        }
-        if let v = props[kCGImagePropertyPixelHeight] as? Int {
-            h = v
-        } else if let v = props[kCGImagePropertyPixelHeight] as? NSNumber {
-            h = v.intValue
-        }
+        return pixelDimensions(props)
+    }
+
+    /// Parses "W×H" from an ImageIO properties dictionary (width/height may
+    /// arrive as Int or NSNumber depending on the source format).
+    private static func pixelDimensions(_ props: [CFString: Any]) -> String? {
+        let w = (props[kCGImagePropertyPixelWidth] as? Int)
+            ?? (props[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue
+        let h = (props[kCGImagePropertyPixelHeight] as? Int)
+            ?? (props[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue
         guard let w, let h, w > 0, h > 0 else { return nil }
         return "\(w)×\(h)"
     }

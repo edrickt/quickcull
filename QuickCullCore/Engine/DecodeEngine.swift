@@ -33,16 +33,11 @@ public actor DecodeEngine {
         public let totalMs: Double
         public let width: Int
         public let height: Int
-        public let openMs: Double
-        public let unpackMs: Double
-        public let processMs: Double
-        public let encodeMs: Double
-        public init(fileID: String, totalMs: Double, width: Int, height: Int, openMs: Double = 0, unpackMs: Double = 0, processMs: Double = 0, encodeMs: Double = 0) {
+        public init(fileID: String, totalMs: Double, width: Int, height: Int) {
             self.fileID = fileID; self.totalMs = totalMs; self.width = width; self.height = height
-            self.openMs = openMs; self.unpackMs = unpackMs; self.processMs = processMs; self.encodeMs = encodeMs
         }
     }
-    private let benchmarkAccum = AtomicBenchmarkAccum()
+    private let benchmarkAccum = LockedAccumulator<Benchmark>()
 
     private let decoder: RawDecoding
     private let cache: ImageCacheStore
@@ -107,7 +102,7 @@ public actor DecodeEngine {
 
                 let total = files.count
                 let reporter = ProgressReporter(total: total, continuation: continuation)
-                let outcomes = AtomicOutcomeAccumulator()
+                let outcomes = LockedAccumulator<DecodeOutcome>()
 
                 await withTaskGroup(of: Void.self) { group in
                     for _ in 0..<workerCount {
@@ -154,16 +149,24 @@ public actor DecodeEngine {
     }
 }
 
-/// FIFO work queue shared by the worker pool.
+/// FIFO work queue shared by the worker pool. Two-stack layout: enqueue
+/// appends to `incoming`, dequeue drains it into `reversed` once and pops
+/// from there — amortized O(1) per operation (unlike `removeFirst`, which
+/// shifts the whole array per dequeue).
 actor JobQueue<Element> {
-    private var items: [Element] = []
+    private var incoming: [Element] = []
+    private var reversed: [Element] = []
 
     func enqueue(_ item: Element) {
-        items.append(item)
+        incoming.append(item)
     }
 
     func dequeue() -> Element? {
-        items.isEmpty ? nil : items.removeFirst()
+        if reversed.isEmpty {
+            reversed = incoming.reversed()
+            incoming.removeAll(keepingCapacity: true)
+        }
+        return reversed.popLast()
     }
 }
 
@@ -187,31 +190,19 @@ actor ProgressReporter {
     }
 }
 
-final class AtomicOutcomeAccumulator: @unchecked Sendable {
+/// Thread-safe append-only array (lock + array). Serves the decode outcome
+/// and benchmark accumulators, which workers append to and the engine reads
+/// once at completion.
+final class LockedAccumulator<Element>: @unchecked Sendable {
     private let lock = NSLock()
-    private var items: [DecodeOutcome] = []
+    private var items: [Element] = []
 
-    func append(_ outcome: DecodeOutcome) {
+    func append(_ item: Element) {
         lock.lock(); defer { lock.unlock() }
-        items.append(outcome)
+        items.append(item)
     }
 
-    func snapshot() -> [DecodeOutcome] {
-        lock.lock(); defer { lock.unlock() }
-        return items
-    }
-}
-
-final class AtomicBenchmarkAccum: @unchecked Sendable {
-    private let lock = NSLock()
-    private var items: [DecodeEngine.Benchmark] = []
-
-    func append(_ b: DecodeEngine.Benchmark) {
-        lock.lock(); defer { lock.unlock() }
-        items.append(b)
-    }
-
-    func snapshot() -> [DecodeEngine.Benchmark] {
+    func snapshot() -> [Element] {
         lock.lock(); defer { lock.unlock() }
         return items
     }

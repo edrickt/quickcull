@@ -22,7 +22,8 @@ struct ScrubView: View {
     var body: some View {
         VStack(spacing: 0) {
             if !appState.importFailures.isEmpty {
-                importFailuresBanner
+                ImportFailuresBanner(failures: appState.importFailures,
+                                     onDismiss: { appState.dismissImportFailures() })
             }
             controlBar
             if appState.viewMode == .grid {
@@ -173,6 +174,28 @@ struct ScrubView: View {
         }
     }
 
+    /// Per-color flag counts, computed once per read. Each `flaggedCount`
+    /// call scans the flags dictionary; the bar previously issued ~10 scans
+    /// per render (filter picker + both dropdowns).
+    @MainActor
+    private struct FlagCounts {
+        let red: Int
+        let yellow: Int
+        let green: Int
+        let all: Int
+        let unflagged: Int
+
+        init(_ session: Session?) {
+            red = session?.flaggedCount(.red) ?? 0
+            yellow = session?.flaggedCount(.yellow) ?? 0
+            green = session?.flaggedCount(.green) ?? 0
+            all = session?.flaggedCount() ?? 0
+            unflagged = session.map { $0.totalCount - $0.flaggedCount() } ?? 0
+        }
+    }
+
+    private var flagCounts: FlagCounts { FlagCounts(appState.session) }
+
     private var viewModePicker: some View {
         Picker("View", selection: Binding(
             get: { appState.viewMode },
@@ -188,15 +211,16 @@ struct ScrubView: View {
     }
 
     private var filterPicker: some View {
-        Picker("Filter", selection: Binding(
+        let counts = flagCounts
+        return Picker("Filter", selection: Binding(
             get: { appState.session?.filter ?? .all },
             set: { appState.setFilter($0) }
         )) {
             Text("All").tag(CullFilter.all)
-            Text("R (\(appState.session?.flaggedCount(.red) ?? 0))").tag(CullFilter.red)
-            Text("Y (\(appState.session?.flaggedCount(.yellow) ?? 0))").tag(CullFilter.yellow)
-            Text("G (\(appState.session?.flaggedCount(.green) ?? 0))").tag(CullFilter.green)
-            Text("Unflagged (\(appState.session.map { $0.totalCount - $0.flaggedCount() } ?? 0))").tag(CullFilter.keepers)
+            Text("R (\(counts.red))").tag(CullFilter.red)
+            Text("Y (\(counts.yellow))").tag(CullFilter.yellow)
+            Text("G (\(counts.green))").tag(CullFilter.green)
+            Text("Unflagged (\(counts.unflagged))").tag(CullFilter.keepers)
         }
         .pickerStyle(.segmented)
         .fontWeight(.light)
@@ -205,25 +229,27 @@ struct ScrubView: View {
 
     @ViewBuilder
     private var actionButtons: some View {
+        let counts = flagCounts
+        let busy = appState.isCommitting || appState.isMoving
         Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
             .fontWeight(.light)
             .help(hudVisible ? "Hide metadata" : "Show metadata")
-            .disabled(appState.isCommitting || appState.isMoving)
+            .disabled(busy)
         DropdownMenu(items: [
-            .init("Trash R (\(appState.session?.flaggedCount(.red) ?? 0))", destructive: true,
-                  disabled: (appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+            .init("Trash R (\(counts.red))", destructive: true,
+                  disabled: counts.red == 0 || busy) {
                 appState.requestCommit(color: .red); showCommitConfirm = true
             },
-            .init("Trash Y (\(appState.session?.flaggedCount(.yellow) ?? 0))", destructive: true,
-                  disabled: (appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+            .init("Trash Y (\(counts.yellow))", destructive: true,
+                  disabled: counts.yellow == 0 || busy) {
                 appState.requestCommit(color: .yellow); showCommitConfirm = true
             },
-            .init("Trash G (\(appState.session?.flaggedCount(.green) ?? 0))", destructive: true,
-                  disabled: (appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+            .init("Trash G (\(counts.green))", destructive: true,
+                  disabled: counts.green == 0 || busy) {
                 appState.requestCommit(color: .green); showCommitConfirm = true
             },
-            .init("Trash All Flagged (\(appState.session?.flaggedCount() ?? 0))", destructive: true,
-                  disabled: (appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+            .init("Trash All Flagged (\(counts.all))", destructive: true,
+                  disabled: counts.all == 0 || busy) {
                 appState.requestCommit(color: nil); showCommitConfirm = true
             },
         ]) {
@@ -233,28 +259,28 @@ struct ScrubView: View {
                 Label("Move Flagged to Trash", systemImage: "trash").fontWeight(.light)
             }
         }
-        .disabled(appState.isCommitting || appState.isMoving)
+        .disabled(busy)
         DropdownMenu(items: [
-            .init("Move R (\(appState.session?.flaggedCount(.red) ?? 0))",
-                  disabled: (appState.session?.flaggedCount(.red) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+            .init("Move R (\(counts.red))",
+                  disabled: counts.red == 0 || busy) {
                 if let dest = chooseMoveDestination() {
                     appState.requestMove(to: dest, color: .red); showMoveConfirm = true
                 }
             },
-            .init("Move Y (\(appState.session?.flaggedCount(.yellow) ?? 0))",
-                  disabled: (appState.session?.flaggedCount(.yellow) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+            .init("Move Y (\(counts.yellow))",
+                  disabled: counts.yellow == 0 || busy) {
                 if let dest = chooseMoveDestination() {
                     appState.requestMove(to: dest, color: .yellow); showMoveConfirm = true
                 }
             },
-            .init("Move G (\(appState.session?.flaggedCount(.green) ?? 0))",
-                  disabled: (appState.session?.flaggedCount(.green) ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+            .init("Move G (\(counts.green))",
+                  disabled: counts.green == 0 || busy) {
                 if let dest = chooseMoveDestination() {
                     appState.requestMove(to: dest, color: .green); showMoveConfirm = true
                 }
             },
-            .init("Move All Flagged (\(appState.session?.flaggedCount() ?? 0))",
-                  disabled: (appState.session?.flaggedCount() ?? 0) == 0 || appState.isCommitting || appState.isMoving) {
+            .init("Move All Flagged (\(counts.all))",
+                  disabled: counts.all == 0 || busy) {
                 if let dest = chooseMoveDestination() {
                     appState.requestMove(to: dest, color: nil); showMoveConfirm = true
                 }
@@ -266,34 +292,7 @@ struct ScrubView: View {
                 Label("Move Flagged", systemImage: "folder").fontWeight(.light)
             }
         }
-        .disabled(appState.isCommitting || appState.isMoving)
-    }
-
-    private var importFailuresBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
-            Text(importFailureSummary)
-                .font(.caption)
-                .lineLimit(1)
-            Spacer()
-            Button("Dismiss") { appState.dismissImportFailures() }
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.yellow.opacity(0.15))
-    }
-
-    private var importFailureSummary: String {
-        let names = appState.importFailures
-            .prefix(3)
-            .map { $0.file.url.lastPathComponent }
-            .joined(separator: ", ")
-        let count = appState.importFailures.count
-        return count > 3
-            ? "\(count) file(s) could not be decoded: \(names) …"
-            : "\(count) file(s) could not be decoded: \(names)"
+        .disabled(busy)
     }
 
     private func chooseMoveDestination() -> URL? {

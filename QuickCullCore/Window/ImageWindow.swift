@@ -68,7 +68,12 @@ public final class ImageWindow {
         inFlight.insert(index)
         let useReduced = reducedLoader != nil && (upgradePolicy?(index, currentIndex) ?? false)
         if useReduced { degradedIndices.insert(index) } else { degradedIndices.remove(index) }
-        let load = useReduced ? reducedLoader! : loader
+        let load: (Int) async -> CGImage?
+        if useReduced, let reduced = reducedLoader {
+            load = reduced
+        } else {
+            load = loader
+        }
         Task { [weak self] in
             let image = await load(index)
             guard let self else { return }
@@ -86,11 +91,7 @@ public final class ImageWindow {
         currentIndex = min(max(index, 0), max(count - 1, 0))
         let windowSet = Set(policy.window(around: currentIndex, count: count))
         let keep = windowSet.union(ensuredIndices)
-        for i in Set(images.keys) where !keep.contains(i) {
-            images.removeValue(forKey: i)
-            inFlight.remove(i)
-            degradedIndices.remove(i)
-        }
+        evictOutsideWindow()
         for i in policy.loadOrder(current: currentIndex, count: count)
         where images[i] == nil && !inFlight.contains(i) {
             startLoad(i)
@@ -104,15 +105,7 @@ public final class ImageWindow {
                 startLoad(i)
             }
         }
-        // Prune ensuredIndices to keep set to avoid unbounded growth.
-        // Without this, ensuredIndices grows monotonically and retains 500 thumbs
-        // for 500 files (keep = window ∪ ensuredIndices), violating memory bounded
-        // viewport+61 invariant. Keep only window ∪ recently ensured viewport.
-        ensuredIndices = ensuredIndices.intersection(keep)
-        ensuredIndices = Set(ensuredIndices.filter { $0 >= 0 && $0 < count })
-        ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
-        // Further bound to viewport (~20-40) + window (61) with LRU eviction
-        pruneEnsuredIndices(windowSet: windowSet, recent: [])
+        pruneEnsuredIndices(windowSet: windowSet, keep: keep, recent: [])
     }
 
     private var ensuredIndices: Set<Int> = []
@@ -131,49 +124,46 @@ public final class ImageWindow {
                 ensuredOrder.append(idx)
             }
         }
-        // Evict anything outside window ∪ ensured
         let keep = windowSet.union(ensuredIndices)
-        for i in Set(images.keys) where !keep.contains(i) {
-            images.removeValue(forKey: i)
-            inFlight.remove(i)
-            degradedIndices.remove(i)
-        }
+        evictOutsideWindow()
         // Only queue the explicitly ensured indices; window already queued by setCurrent.
         for i in ensuredIndices where images[i] == nil && !inFlight.contains(i) {
             startLoad(i)
         }
-        // Prune ensuredIndices to keep set to keep memory bounded (viewport + 61).
-        ensuredIndices = ensuredIndices.intersection(keep)
-        ensuredIndices = Set(ensuredIndices.filter { $0 >= 0 && $0 < count })
-        ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
-        pruneEnsuredIndices(windowSet: windowSet, recent: validNew)
+        pruneEnsuredIndices(windowSet: windowSet, keep: keep, recent: validNew)
     }
 
-    /// LRU viewport bounding: keep only window + most recently ensured viewport (~40).
-    /// Keeps memory bounded to viewport (~20-40) + scrub window 61 even for 500+ files.
-    private func pruneEnsuredIndices(windowSet: Set<Int>, recent: [Int]) {
+    /// Evicts every resident image outside `window ∪ ensuredIndices`,
+    /// dropping its in-flight marker and degraded flag with it. Eviction
+    /// targets come from the tested `WindowPolicy.toEvict` minus the
+    /// ensured viewport.
+    private func evictOutsideWindow() {
+        let outside = policy.toEvict(resident: Set(images.keys), current: currentIndex, count: count)
+        for i in outside where !ensuredIndices.contains(i) {
+            images.removeValue(forKey: i)
+            inFlight.remove(i)
+            degradedIndices.remove(i)
+        }
+    }
+
+    /// Bounds `ensuredIndices` to the window ∪ a small recent viewport:
+    /// drops entries outside `keep`, then LRU-caps the remainder at the 40
+    /// most recent ensures beyond the window. Without the cap, ensured
+    /// indices grow monotonically and retain thumbs for the whole shoot,
+    /// violating the bounded viewport + window invariant.
+    private func pruneEnsuredIndices(windowSet: Set<Int>, keep: Set<Int>, recent: [Int]) {
         let maxViewport = 40
+        ensuredIndices = ensuredIndices.intersection(keep).filter { $0 >= 0 && $0 < count }
+        ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
         let cap = windowSet.count + maxViewport
         guard ensuredIndices.count > cap else { return }
-        // Keep window plus the most recent maxViewport ensures (LRU).
-        // ensuredOrder is insertion/recency order; suffix holds most recent.
-        let recentToKeep = Set(ensuredOrder.suffix(maxViewport))
-        let keepSet = windowSet.union(recentToKeep).union(recent)
-        let toRemove = ensuredIndices.subtracting(keepSet)
-        for idx in toRemove {
+        let keepSet = windowSet
+            .union(ensuredOrder.suffix(maxViewport))
+            .union(recent)
+        for idx in ensuredIndices.subtracting(keepSet) {
             ensuredIndices.remove(idx)
         }
         ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
-        // If still over cap (e.g., window 61 + 40 =101 but we have large window), trim oldest beyond window
-        if ensuredIndices.count > cap {
-            // Keep window + most recent viewport, drop oldest viewport entries
-            let keepCount = cap - windowSet.count
-            let viewportToKeep = Set(ensuredOrder.filter { !windowSet.contains($0) }.suffix(keepCount))
-            let finalKeep = windowSet.union(viewportToKeep).union(recentToKeep).union(recent)
-            let extraRemove = ensuredIndices.subtracting(finalKeep)
-            for idx in extraRemove { ensuredIndices.remove(idx) }
-            ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
-        }
     }
 
     public func image(at index: Int) -> CGImage? { images[index] }
@@ -191,19 +181,6 @@ public final class ImageWindow {
 
     // MARK: App factories
 
-    /// Filmstrip window: radius 30, 320 px thumbnails.
-    public static func thumbnails(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
-        ImageWindow(radius: 30, count: files.count) { [cache] index in
-            guard index >= 0, index < files.count else { return nil }
-            let url = try? await cache.cacheURL(for: files[index])
-            // Decode off the main actor: even a small JPEG takes tens of ms,
-            // and scrubbing must never block the UI thread.
-            return await Task.detached(priority: .utility) {
-                loadJPEG(at: url, maxPixelSize: 320)
-            }.value
-        }
-    }
-
     /// Grid window: all thumbnails (no sliding window). Used only by GridView;
     /// strip stays bounded (radius 30) for memory. Grid needs stable thumbs
     /// while scrolling — evicting on scroll would unload visible cells.
@@ -215,7 +192,7 @@ public final class ImageWindow {
             guard index >= 0, index < files.count else { return nil }
             let url = try? await cache.cacheURL(for: files[index])
             return await Task.detached(priority: .utility) {
-                loadJPEG(at: url, maxPixelSize: 320)
+                decodeJPEG(at: url, maxPixelSize: 320)
             }.value
         }
     }
@@ -300,18 +277,8 @@ public final class ImageWindow {
     /// for a 20 MP entry vs ~144 ms full, at ~1/4 of the bitmap memory).
     /// Used for the outer window ring; upgraded to full-res on landing.
     nonisolated static func loadJPEGHalfRes(at url: URL?) -> CGImage? {
-        guard let url,
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = props[kCGImagePropertyPixelWidth] as? Int,
-              let height = props[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0 else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: max(width, height) / 2,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        guard let longEdge = jpegLongEdge(at: url) else { return nil }
+        return decodeJPEG(at: url, maxPixelSize: longEdge / 2)
     }
 
     /// Full-resolution decode of a cached JPEG: reads the JPEG's own header
@@ -320,24 +287,14 @@ public final class ImageWindow {
     /// orientation tag), so `WithTransform` is a no-op kept for symmetry with
     /// the thumbnail path. CPU-bound, so callers run it off the main actor.
     nonisolated static func loadJPEGFullRes(at url: URL?) -> CGImage? {
-        guard let url,
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = props[kCGImagePropertyPixelWidth] as? Int,
-              let height = props[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0 else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: max(width, height),
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        guard let longEdge = jpegLongEdge(at: url) else { return nil }
+        return decodeJPEG(at: url, maxPixelSize: longEdge)
     }
 
     /// Downsamples a cached JPEG (thumbnail API = memory-bounded). Decoding
     /// is CPU-bound (tens to hundreds of ms for a 45 MP cache entry), so
     /// callers run this off the main actor via a detached task.
-    nonisolated private static func loadJPEG(at url: URL?, maxPixelSize: Int) -> CGImage? {
+    nonisolated private static func decodeJPEG(at url: URL?, maxPixelSize: Int) -> CGImage? {
         guard let url,
               let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let options: [CFString: Any] = [
@@ -346,6 +303,18 @@ public final class ImageWindow {
             kCGImageSourceCreateThumbnailWithTransform: true,
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// Reads a cached JPEG's own header dimensions (header only, no pixel
+    /// decode) and returns the long edge, or nil when unreadable.
+    nonisolated private static func jpegLongEdge(at url: URL?) -> Int? {
+        guard let url,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Int,
+              let height = props[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0 else { return nil }
+        return max(width, height)
     }
 }
 

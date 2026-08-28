@@ -85,7 +85,7 @@ Build the test bundle, then run it directly with `xcrun xctest`:
 
     xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 
-162 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
+176 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
 
 ### Fixtures
 

@@ -66,17 +66,9 @@ public final class AppState {
         Task { try? await cache.wipe() }
     }
 
-    /// Full reset equivalent to quit+relaunch. Single owner of the empty transition.
-    /// Always confirmed by ScrubView, so no flag-count guard here.
-    @MainActor
-    public func startNewSession() {
-        Task { try? await cache.wipe() }
-        session = nil
-        thumbWindow = nil
-        gridThumbs = nil
-        displayImages = nil
-        importFailures = []
-        commitFailures = []
+    /// Clears pending/failure state for both commit flows. Used at session
+    /// start, on import, and after a confirmed commit finishes.
+    private func resetTransientState() {
         pendingCommitCount = 0
         pendingCommitColor = nil
         lastCommitColor = nil
@@ -87,11 +79,31 @@ public final class AppState {
         lastMoveColor = nil
         moveFailures = []
         isMoving = false
+    }
+
+    /// Single owner of the empty transition: drop the session and windows,
+    /// return to the importer in scrub mode.
+    private func transitionToEmptySession() {
+        session = nil
+        thumbWindow = nil
+        gridThumbs = nil
+        displayImages = nil
+        viewMode = .scrub
+        phase = .empty
+    }
+
+    /// Full reset equivalent to quit+relaunch. Single owner of the empty transition.
+    /// Always confirmed by ScrubView, so no flag-count guard here.
+    @MainActor
+    public func startNewSession() {
+        Task { try? await cache.wipe() }
+        transitionToEmptySession()
+        resetTransientState()
+        importFailures = []
+        commitFailures = []
         isLoupeActive = false
         gridSelection = []
         gridAnchorID = nil
-        viewMode = .scrub
-        phase = .empty
     }
 
     public func setLoupeActive(_ active: Bool) {
@@ -118,15 +130,7 @@ public final class AppState {
                 DecodeOutcome(file: SessionFile(url: $0),
                               error: .cannotOpen("Unsupported format"))
             }
-            pendingCommitCount = 0
-            pendingCommitColor = nil
-            lastCommitColor = nil
-            pendingMoveCount = 0
-            pendingMoveDestination = nil
-            pendingMoveColor = nil
-            lastMoveColor = nil
-            moveFailures = []
-            isMoving = false
+            resetTransientState()
             phase = .empty
             return
         }
@@ -141,15 +145,7 @@ public final class AppState {
         session = Session(files: files)
         importFailures = []
         commitFailures = []
-        pendingCommitCount = 0
-        pendingCommitColor = nil
-        lastCommitColor = nil
-        pendingMoveCount = 0
-        pendingMoveDestination = nil
-        pendingMoveColor = nil
-        lastMoveColor = nil
-        moveFailures = []
-        isMoving = false
+        resetTransientState()
         phase = .decoding(completed: 0, total: files.count)
 
         let engine = DecodeEngine(decoder: decoder, cache: cache, options: decodeOptions)
@@ -173,12 +169,7 @@ public final class AppState {
                     if session?.isEmpty == true {
                         // All failed: back to the empty state; its banner
                         // surfaces the failures.
-                        session = nil
-                        thumbWindow = nil
-                        gridThumbs = nil
-                        displayImages = nil
-                        phase = .empty
-                        viewMode = .scrub
+                        transitionToEmptySession()
                     } else if let session {
                         // Loaders index into the files array, so it must be
                         // the post-removal list.
@@ -352,12 +343,7 @@ public final class AppState {
         pendingCommitColor = nil
         isCommitting = false
         if session.isEmpty {
-            self.session = nil
-            thumbWindow = nil
-            gridThumbs = nil
-            displayImages = nil
-            phase = .empty
-            viewMode = .scrub
+            transitionToEmptySession()
         } else {
             installWindows(for: session.files)
         }
@@ -400,12 +386,7 @@ public final class AppState {
         pendingMoveColor = nil
         isMoving = false
         if session.isEmpty {
-            self.session = nil
-            thumbWindow = nil
-            gridThumbs = nil
-            displayImages = nil
-            phase = .empty
-            viewMode = .scrub
+            transitionToEmptySession()
         } else {
             installWindows(for: session.files)
         }
