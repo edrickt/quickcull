@@ -13,8 +13,10 @@ struct GridView: View {
     var body: some View {
         // Parent-body reads: avoid per-cell observation that makes LazyVGrid re-evaluate 500 cells on every gridSelection change.
         // Mirrors FilmstripView's stripKey/elements pattern for fast scrub.
-        // Grid uses its own all-thumbs window (no sliding window): gridThumbs loads every thumbnail and never evicts on scroll,
-        // unlike the strip's thumbWindow (radius 30) which unloads off-window cells.
+        // Grid uses its own all-thumbs window (no sliding window): gridThumbs can hold every
+        // thumbnail and never evicts on scroll, so scrolling the grid cannot unload a visible
+        // cell. It loads lazily through ensureLoaded below; the strip's thumbWindow is the
+        // bounded one (radius 30), and its cells ensureLoad too.
         let files = appState.session?.files ?? []
         let gridSelection = appState.gridSelection
         let flags = appState.session?.flags ?? [:]

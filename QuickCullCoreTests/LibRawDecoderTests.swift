@@ -114,10 +114,17 @@ final class LibRawDecoderTests: XCTestCase {
     func testSuperCCDAndXTransNowHaveHistogram() throws {
         let fuji = try decoder.decodeRaw(at: fixture("fuji_e550","raf"))
         XCTAssertNil(fuji.histogram, "super-CCD/X-Trans returns nil raw histogram; DisplayHistogram fallback used in UI")
-        // Fallback is rendered: verify DisplayHistogram still works for its CGImage
+        // Fallback is rendered: verify DisplayHistogram still works for its CGImage.
+        // It samples a downscaled copy (see `maxSampleEdge`), so the absolute
+        // count is the sampled pixel count; the invariant is that every sampled
+        // pixel contributes to exactly one bin per channel, and none are lost.
         let fallback = DisplayHistogram.compute(from: fuji.image)
         XCTAssertEqual(fallback.sensorMax, 255)
-        XCTAssertEqual(fallback.samples[0], fuji.width * fuji.height)
+        let sampled = fallback.luminance.reduce(0, +)
+        XCTAssertGreaterThan(sampled, 0)
+        XCTAssertEqual(fallback.samples[0], sampled)
+        XCTAssertEqual(fallback.samples[1], sampled)
+        XCTAssertEqual(fallback.samples[2], sampled)
         XCTAssertEqual(fallback.luminance.count, RawHistogram.binCount)
     }
 

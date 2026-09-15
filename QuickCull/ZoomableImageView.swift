@@ -214,9 +214,18 @@ struct ZoomableImageView: View {
             // Only handle event over this pane — prevents Split double-apply.
             // If globalFrame is still .zero (pre-layout), allow handling so initial
             // two-finger pan isn't blocked until the first layout pass / click-drag.
+            // `globalFrame` is in SwiftUI's window-relative `.global` space while
+            // `NSEvent.mouseLocation` is screen-space, so the two must be bridged
+            // through the window frame (see WindowHitTest) — comparing them
+            // directly made pan depend on the window's position on screen.
             let gf = frameBinding.wrappedValue
             let mouse = NSEvent.mouseLocation
-            if !gf.isEmpty && !gf.contains(mouse) { return event }
+            if !gf.isEmpty {
+                guard let window = event.window ?? NSApp.keyWindow else { return event }
+                guard WindowHitTest.contains(screenPoint: mouse,
+                                             windowFrame: window.frame,
+                                             paneGlobalFrame: gf) else { return event }
+            }
             let dx: CGFloat = event.hasPreciseScrollingDeltas ? event.scrollingDeltaX : CGFloat(event.deltaX) * 10
             let dy: CGFloat = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : CGFloat(event.deltaY) * 10
             if abs(dx) < 0.02 && abs(dy) < 0.02 { return event }

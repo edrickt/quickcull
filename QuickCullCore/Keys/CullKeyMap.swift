@@ -16,9 +16,6 @@ public enum CullKeyMap {
     private static let rightArrow: UInt16 = 124
     private static let downArrow: UInt16 = 125
     private static let upArrow: UInt16 = 126
-    private static let zKey: UInt16 = 6
-    private static let xKey: UInt16 = 7
-    private static let cKey: UInt16 = 8
 
     public static func action(forKeyCode keyCode: UInt16) -> CullAction? {
         switch keyCode {
@@ -26,10 +23,12 @@ public enum CullKeyMap {
         case rightArrow: return .next
         case downArrow: return .jumpForward
         case upArrow: return .jumpBack
-        case zKey: return .toggleFlag(.red)
-        case xKey: return .toggleFlag(.yellow)
-        case cKey: return .toggleFlag(.green)
-        default: return nil
+        default:
+            // Flag keys live on `FlagColor` so the key map and the colour
+            // legends can never drift apart.
+            return FlagColor.allCases
+                .first { $0.keyCode == keyCode }
+                .map { .toggleFlag($0) }
         }
     }
 }

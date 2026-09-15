@@ -161,7 +161,7 @@ final class DecodeEngineTests: XCTestCase {
 
     func testHistogramSidecarWrittenWhenBitmapHasHistogram() async throws {
         let files = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
-        let hist = RawHistogram(bins: [[0, 1], [2, 3], [4, 5]], sensorMax: 255)
+        let hist = TestFixtures.makeFullHistogram(sensorMax: 255)
         let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         let engine = DecodeEngine(decoder: StubDecoder(histogram: hist), cache: cache)

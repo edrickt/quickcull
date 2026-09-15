@@ -9,6 +9,15 @@ DEST="$ROOT/Build/libraw"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Idempotent: the Xcode build phase runs this script on every build, so the
+# pinned VERSION is checked here rather than by the phase. Without the marker a
+# version bump would silently keep the previous dylib (the phase used to skip
+# the script whenever the file existed).
+MARKER="$DEST/.version"
+if [ -f "$DEST/libraw.dylib" ] && [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "$VERSION" ]; then
+    exit 0
+fi
+
 echo "Downloading LibRaw ${VERSION}…"
 curl -fsSL -o "$WORK/libraw.tar.gz" "https://github.com/LibRaw/LibRaw/archive/refs/tags/${VERSION}.tar.gz"
 echo "$SHA256  $WORK/libraw.tar.gz" | shasum -a 256 -c -
@@ -26,5 +35,6 @@ clang++ -std=c++11 -O2 -fPIC -DLIBRAW_NODLL -DNO_JPEG -DNO_JASPER -DNO_LCMS \
   $SOURCES -o "$DEST/libraw.dylib"
 
 cp -R "$SRC/libraw" "$DEST/include/"
+printf '%s\n' "$VERSION" > "$MARKER"
 echo "Built $DEST/libraw.dylib"
 lipo -info "$DEST/libraw.dylib"

@@ -26,6 +26,10 @@ public final class AppState {
     public private(set) var session: Session?
     public private(set) var importFailures: [DecodeOutcome] = []
     public private(set) var commitFailures: [TrashOutcome] = []
+    /// Bumped once per completed commit, so the UI can announce a failure even
+    /// when the count is unchanged (two commits failing on one file each).
+    /// Observing `commitFailures.count` misses that second notification.
+    public private(set) var commitFailureRevision: Int = 0
     public private(set) var pendingCommitCount: Int = 0
     public private(set) var pendingCommitColor: FlagColor?
     public private(set) var lastCommitColor: FlagColor?
@@ -36,6 +40,8 @@ public final class AppState {
     public private(set) var lastMoveColor: FlagColor?
     /// `internal(set)` so tests can inject failures; app code treats as read-only.
     public internal(set) var moveFailures: [MoveOutcome] = []
+    /// See `commitFailureRevision`.
+    public private(set) var moveFailureRevision: Int = 0
     public private(set) var isMoving: Bool = false
     public private(set) var isLoupeActive: Bool = false
     private let mover: Moving
@@ -54,6 +60,21 @@ public final class AppState {
     /// it is a no-op); no UI path re-imports while one runs today, but the
     /// guard keeps that invariant local instead of incidental.
     private var importTask: Task<Void, Never>?
+    /// One-shot guard for `prepareForLaunch` (see there).
+    private var hasPreparedForLaunch = false
+
+    /// Monotonic session identity, bumped by every path that installs or
+    /// discards a session. A commit/move started against the previous session
+    /// runs off the main actor; it captures this value and re-checks it before
+    /// writing any state, so a completion that lands after `New Session` (or a
+    /// re-import) can never install windows or flags for a session that no
+    /// longer exists.
+    private var sessionGeneration = 0
+    /// `sessionGeneration` the windows were built for. A projection change
+    /// within one session retargets the existing windows; a new session (or a
+    /// re-import) rebuilds them, because the loaders capture that session's
+    /// files.
+    private var windowsGeneration = -1
 
     public init(decoder: RawDecoding = RoutingDecoder(librawDecoder: LibRawDecoder(),
                                                       imageIODecoder: ImageIODecoder()),
@@ -67,8 +88,12 @@ public final class AppState {
     }
 
     /// Launch-time authoritative cache cleanup (leftovers from crashes
-    /// included); runs detached so UI never waits on it.
+    /// included); runs detached so UI never waits on it. Idempotent: a second
+    /// window or a restored scene must not wipe the cache a running session is
+    /// reading from.
     public func prepareForLaunch() {
+        guard !hasPreparedForLaunch else { return }
+        hasPreparedForLaunch = true
         Task { try? await cache.wipe() }
     }
 
@@ -79,6 +104,7 @@ public final class AppState {
         pendingCommitColor = nil
         lastCommitColor = nil
         isCommitting = false
+        commitFailures = []
         pendingMoveCount = 0
         pendingMoveDestination = nil
         pendingMoveColor = nil
@@ -90,6 +116,7 @@ public final class AppState {
     /// Single owner of the empty transition: drop the session and windows,
     /// return to the importer in scrub mode.
     private func transitionToEmptySession() {
+        sessionGeneration += 1
         session = nil
         thumbWindow = nil
         gridThumbs = nil
@@ -150,6 +177,7 @@ public final class AppState {
             .map { DecodeOutcome(file: SessionFile(url: $0),
                                  error: .cannotOpen("Unsupported format")) }
         session = Session(files: files)
+        sessionGeneration += 1
         importFailures = []
         commitFailures = []
         resetTransientState()
@@ -195,14 +223,28 @@ public final class AppState {
     }
 
     private func installWindows(for files: [SessionFile]) {
-        // No sliding window for thumbnails: grid and strip share an all-thumbs window (radius = count).
-        // All thumbnails stay loaded while scrolling, no eviction.
-        let thumbs = ImageWindow.gridThumbnails(files: files, cache: cache)
-        thumbWindow = thumbs
-        gridThumbs = thumbs
-        displayImages = ImageWindow.display(files: files, cache: cache)
+        let ids = files.map(\.id)
+        if thumbWindow == nil || gridThumbs == nil || displayImages == nil
+            || windowsGeneration != sessionGeneration {
+            // Strip stays bounded (radius 30); the grid keeps every thumbnail
+            // eligible but loads only the cells that appear.
+            thumbWindow = ImageWindow.thumbnails(files: files, cache: cache)
+            gridThumbs = ImageWindow.gridThumbnails(files: files, cache: cache)
+            displayImages = ImageWindow.display(files: files, cache: cache)
+            windowsGeneration = sessionGeneration
+        } else {
+            // Filter switch, flag drop-out, commit: retarget in place so every
+            // already-decoded image survives (a rebuild re-decodes the whole
+            // window, which used to cost one decode per file in the shoot on
+            // each flag toggle under a filter). An empty projection empties the
+            // windows too — returning to All then re-decodes the bounded window,
+            // which keeps the windows consistent with the session at a cost
+            // that only the empty-placeholder path pays.
+            thumbWindow?.retarget(ids: ids)
+            gridThumbs?.retarget(ids: ids)
+            displayImages?.retarget(ids: ids)
+        }
         syncWindows()
-        thumbs.setCurrent(0)
     }
 
     /// Dismisses the import-failure banner once the user has seen it.
@@ -336,6 +378,7 @@ public final class AppState {
 
     public func confirmCommit() async {
         guard let session, !isCommitting, !isMoving else { return }
+        let generation = sessionGeneration
         let color = pendingCommitColor
         let flagged = session.flaggedFiles(color)
         guard !flagged.isEmpty else { pendingCommitCount = 0; pendingCommitColor = nil; return }
@@ -343,10 +386,15 @@ public final class AppState {
         let outcomes = await Task.detached(priority: .userInitiated) {
             TrashCommit(trasher: self.trasher).commit(files: flagged)
         }.value
+        // The session can be torn down or replaced while this runs (New Session
+        // is reachable from the menu bar). A stale completion must not write
+        // windows or flags for a session that no longer exists.
+        guard generation == sessionGeneration else { return }
         let succeeded = outcomes.filter(\.succeeded).map(\.file)
         session.remove(succeeded)
         gridSelection = gridSelection.filter { session.contains(id: $0) }
         commitFailures = outcomes.filter { !$0.succeeded }
+        commitFailureRevision += 1
         lastCommitColor = commitFailures.isEmpty ? nil : color
         pendingCommitCount = 0
         pendingCommitColor = nil
@@ -378,6 +426,7 @@ public final class AppState {
     }
     public func confirmMove() async {
         guard let session, !isCommitting, !isMoving, let dest = pendingMoveDestination else { return }
+        let generation = sessionGeneration
         let color = pendingMoveColor
         let flagged = session.flaggedFiles(color)
         guard !flagged.isEmpty else { pendingMoveCount = 0; pendingMoveDestination = nil; pendingMoveColor = nil; return }
@@ -385,10 +434,14 @@ public final class AppState {
         let outcomes = await Task.detached(priority: .userInitiated) {
             MoveCommit(mover: self.mover).commit(files: flagged, to: dest)
         }.value
+        // See confirmCommit: never write over a session that was replaced or
+        // discarded while the move was in flight.
+        guard generation == sessionGeneration else { return }
         let succeeded = outcomes.filter(\.succeeded).map(\.file)
         session.remove(succeeded)
         gridSelection = gridSelection.filter { session.contains(id: $0) }
         moveFailures = outcomes.filter { !$0.succeeded }
+        moveFailureRevision += 1
         lastMoveColor = moveFailures.isEmpty ? nil : color
         pendingMoveCount = 0
         pendingMoveDestination = nil

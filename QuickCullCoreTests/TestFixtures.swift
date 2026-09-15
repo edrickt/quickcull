@@ -57,4 +57,19 @@ enum TestFixtures {
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return (ImageCacheStore(baseURL: base), base)
     }
+
+    /// A full-shape histogram (3 × 256 bins plus 256 luminance bins) with a
+    /// couple of populated bins per channel — the only shape the decoders write
+    /// and the cache validates on load.
+    static func makeFullHistogram(sensorMax: Int = 16383,
+                                  luminance: [Int]? = nil) -> RawHistogram {
+        var bins = [[Int]](repeating: [Int](repeating: 0, count: RawHistogram.binCount), count: 3)
+        for channel in 0..<3 {
+            bins[channel][channel] = channel + 1
+            bins[channel][RawHistogram.binCount - 1] = 9 + channel
+        }
+        return RawHistogram(bins: bins,
+                            luminance: luminance ?? [Int](repeating: 0, count: RawHistogram.binCount),
+                            sensorMax: sensorMax)
+    }
 }

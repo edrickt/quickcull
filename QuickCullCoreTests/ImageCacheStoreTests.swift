@@ -108,7 +108,7 @@ final class ImageCacheStoreTests: XCTestCase {
 
     func testStoreAndLoadHistogramRoundTrip() async throws {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
-        let hist = RawHistogram(bins: [[0, 1, 2], [3, 4, 5], [6, 7, 8]], sensorMax: 16383)
+        let hist = TestFixtures.makeFullHistogram()
         try await store.storeHistogram(hist, for: file)
         let loaded = try await store.loadHistogram(for: file)
         XCTAssertEqual(loaded, hist)
@@ -117,7 +117,7 @@ final class ImageCacheStoreTests: XCTestCase {
     func testStoreAndLoadHistogramWithLuminance() async throws {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "e.cr2", in: base))
         var lum = [Int](repeating: 0, count: RawHistogram.binCount); lum[5]=42; lum[200]=7
-        let hist = RawHistogram(bins: [[0,1,2],[3,4,5],[6,7,8]], luminance: lum, sensorMax: 16383)
+        let hist = TestFixtures.makeFullHistogram(luminance: lum)
         try await store.storeHistogram(hist, for: file)
         let loaded = try await store.loadHistogram(for: file)
         XCTAssertEqual(loaded, hist)
@@ -133,8 +133,16 @@ final class ImageCacheStoreTests: XCTestCase {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "c.cr2", in: base))
         let url = try await store.histogramURL(for: file)
         try Data("not json".utf8).write(to: url)
-        let loaded = try await store.loadHistogram(for: file)
-        XCTAssertNil(loaded)
+        let notJSON = try await store.loadHistogram(for: file)
+        XCTAssertNil(notJSON)
+
+        // Valid JSON, wrong shape (2 channels of 2 bins): decoding must fail
+        // instead of handing the views a histogram they would subscript out of
+        // range. Regression for a crash on a truncated or hand-edited sidecar.
+        let wrongShape = #"{"bins":[[1,2],[3,4]],"sensorMax":255}"#
+        try Data(wrongShape.utf8).write(to: url)
+        let shapeMismatch = try await store.loadHistogram(for: file)
+        XCTAssertNil(shapeMismatch)
     }
 
     func testHistogramURLSharesCacheKey() async throws {

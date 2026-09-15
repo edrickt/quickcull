@@ -43,8 +43,11 @@ struct ScrubView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         // File ▸ New Session (menu bar) routes here via the focused value,
-        // presenting the confirmation in this window.
-        .focusedSceneValue(\.newSessionAction) { showNewSessionConfirm = true }
+        // presenting the confirmation in this window. Publishing nil while a
+        // commit or move is in flight disables the command (see QuickCullApp):
+        // tearing the session down mid-commit would leave the in-flight
+        // completion writing state for a session that no longer exists.
+        .focusedSceneValue(\.newSessionAction, newSessionAction)
         .alert("Move \(appState.pendingCommitCount) \(appState.pendingCommitColor?.displayName ?? "flagged") file(s) to Trash?",
                isPresented: $showCommitConfirm) {
             Button("Move to Trash", role: .destructive) {
@@ -81,11 +84,11 @@ struct ScrubView: View {
         } message: {
             Text("This discards the current session, including flagged photos, and clears the decode cache.")
         }
-        .onChange(of: appState.commitFailures.count) {
-            if appState.commitFailures.count > 0 { showCommitFailures = true }
+        .onChange(of: appState.commitFailureRevision) {
+            if !appState.commitFailures.isEmpty { showCommitFailures = true }
         }
-        .onChange(of: appState.moveFailures.count) {
-            if appState.moveFailures.count > 0 { showMoveFailures = true }
+        .onChange(of: appState.moveFailureRevision) {
+            if !appState.moveFailures.isEmpty { showMoveFailures = true }
         }
         .onChange(of: appState.phase) { _, newPhase in
             // New import or empty session: reset zoom to fit so a stale 200% does not surprise the next shoot.
@@ -113,6 +116,12 @@ struct ScrubView: View {
     private func isDecoding(_ phase: AppPhase) -> Bool {
         if case .decoding = phase { return true }
         return false
+    }
+
+    /// `File ▸ New Session` is withheld while a commit or move is in flight.
+    private var newSessionAction: (() -> Void)? {
+        guard !appState.isCommitting, !appState.isMoving else { return nil }
+        return { showNewSessionConfirm = true }
     }
 
     /// View-mode/filter segmented pickers and all action buttons

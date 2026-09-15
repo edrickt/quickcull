@@ -13,14 +13,18 @@ import QuickCullCore
 /// first press activates the button underneath.
 struct DropdownMenu<Label: View>: View {
     struct Item: Identifiable {
-        let id: UUID
+        /// The title doubles as the identity: it is unique inside a menu, and
+        /// a stable id keeps `ForEach` diffing (and hover) intact across the
+        /// menu's frequent parent re-renders. A fresh `UUID()` per render
+        /// re-created every row instead.
+        let id: String
         let title: String
         let destructive: Bool
         let disabled: Bool
         let action: () -> Void
 
         init(_ title: String, destructive: Bool = false, disabled: Bool = false, action: @escaping () -> Void) {
-            self.id = UUID()
+            self.id = title
             self.title = title
             self.destructive = destructive
             self.disabled = disabled
@@ -33,11 +37,19 @@ struct DropdownMenu<Label: View>: View {
 
     @State private var isOpen = false
     @State private var toggleFrame: CGRect = .zero // window coordinates
-    @State private var panelFrame: CGRect = .zero  // window coordinates
+    /// The panel's frame is written from the AppKit layout pass and read only
+    /// by the event monitor (never by `body`), so it lives in a reference box:
+    /// a `@State` write there would invalidate layout for a value no layout
+    /// depends on.
+    @State private var panelFrameBox = FrameBox()
     @State private var windowWidth: CGFloat = 0
     @State private var monitor: Any?
     @State private var resignObserver: NSObjectProtocol?
-    @State private var hoveredItemID: UUID?
+    @State private var hoveredItemID: String?
+
+    private final class FrameBox {
+        var frame: CGRect = .zero
+    }
 
     init(items: [Item], @ViewBuilder label: () -> Label) {
         self.items = items
@@ -51,6 +63,8 @@ struct DropdownMenu<Label: View>: View {
             label
         }
         .background(FrameAnchor { frame, width in
+            // Written during the AppKit layout pass. The toggle frame feeds
+            // `panelXOffset`, so it does have to invalidate layout.
             toggleFrame = frame
             windowWidth = width
         })
@@ -61,7 +75,7 @@ struct DropdownMenu<Label: View>: View {
                 // .offset measures the pre-offset frame).
                 panel
                     .background(FrameAnchor { frame, _ in
-                        panelFrame = frame
+                        panelFrameBox.frame = frame
                     })
                     .offset(x: panelXOffset, y: toggleFrame.height + 4)
             }
@@ -145,7 +159,7 @@ struct DropdownMenu<Label: View>: View {
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
             guard self.isOpen, let window = event.window else { return event }
             let click = window.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero)).origin
-            let panel = window.convertToScreen(self.panelFrame)
+            let panel = window.convertToScreen(self.panelFrameBox.frame)
             let toggle = window.convertToScreen(self.toggleFrame)
             switch DropdownClickPolicy.classify(click: click, panel: panel, toggle: toggle) {
             case .ignore:

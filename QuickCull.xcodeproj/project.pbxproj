@@ -352,7 +352,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ ! -f \"$PROJECT_DIR/Build/libraw/libraw.dylib\" ]; then bash \"$PROJECT_DIR/Scripts/build-libraw.sh\"; fi\n";
+			shellScript = "bash \"$PROJECT_DIR/Scripts/build-libraw.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

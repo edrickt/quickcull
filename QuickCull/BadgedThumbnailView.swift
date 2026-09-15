@@ -3,8 +3,10 @@ import QuickCullCore
 
 /// Reusable thumbnail that enforces the badge invariant:
 /// badge is overlayed on the *image* (top-trailing), never on the placeholder.
-/// Use for grid and any future thumbnail surfaces. The strip's Canvas uses
-/// `FlagBadgeLogic.shouldShow` directly for its single-commit optimization.
+/// The invariant is structural here — the badge code lives inside the
+/// `if let image` branch, so a placeholder can never carry one — and
+/// `FlagBadgeLogic.shouldShow` states the rule for the same inputs.
+/// Use for grid and any future thumbnail surfaces.
 struct BadgedThumbnailView: View {
     let image: CGImage?
     let flagColor: FlagColor?
@@ -21,8 +23,11 @@ struct BadgedThumbnailView: View {
                             .resizable()
                             .scaledToFit()
                             .overlay(alignment: .topTrailing) {
-                                if let c = flagColor, FlagBadgeLogic.shouldShow(isFlagged: true, hasImage: true) {
-                                    FlagBadge(color: c, size: badgeSize)
+                                // `hasImage` is structurally true (we are inside
+                                // `if let image`); `isFlagged` is the real input.
+                                if FlagBadgeLogic.shouldShow(isFlagged: flagColor != nil, hasImage: true),
+                                   let color = flagColor {
+                                    FlagBadge(color: color, size: badgeSize)
                                 }
                             }
                     }

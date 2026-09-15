@@ -59,6 +59,13 @@ struct FilmstripView: View {
                         ThumbnailCell(index: element.index, file: element.file,
                                       flagColor: element.flagColor,
                                       image: element.image, isCurrent: element.isCurrent)
+                        // The strip window is bounded (radius 30), so a visible
+                        // cell keeps its own load queued: scrolling past the
+                        // window shows a placeholder only until that cell's
+                        // load lands, and memory stays bounded by the window.
+                        .task(id: element.index) {
+                            appState.thumbWindow?.ensureLoaded(indices: [element.index])
+                        }
                     }
                 }
                 .padding(6)

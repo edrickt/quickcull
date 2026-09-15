@@ -260,4 +260,115 @@ final class ImageWindowTests: XCTestCase {
         await window.waitUntilSettled()
         XCTAssertEqual(window.image(at: ringAhead)?.width, 64, "landing upgrades the ring to full-res")
     }
+
+    // MARK: Identity retargeting
+
+    /// Thread-safe counter for loader/decode assertions.
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [String] = []
+        func append(_ item: String) { lock.lock(); defer { lock.unlock() }; items.append(item) }
+        var snapshot: [String] { lock.lock(); defer { lock.unlock() }; return items }
+        var count: Int { snapshot.count }
+        func contains(_ item: String) -> Bool { snapshot.contains(item) }
+    }
+
+    private func firstByte(of image: CGImage?) -> UInt8? {
+        guard let image, let data = image.dataProvider?.data else { return nil }
+        return CFDataGetBytePtr(data)?[0]
+    }
+
+    private func identifiedWindow(ids: [String], radius: Int = 30,
+                                  loader: @escaping (String) async -> CGImage?) -> ImageWindow {
+        ImageWindow(policy: WindowPolicy(radius: radius), ids: ids, loader: loader)
+    }
+
+    /// Retargeting a window onto a reordered/shrunken identity list must move
+    /// each decoded image with its identity, without decoding anything again.
+    func testRetargetPreservesResidentImagesWithoutDecoding() async {
+        let colors: [String: UInt8] = ["a": 10, "b": 20, "c": 30, "d": 40]
+        let loads = Counter()
+        let window = identifiedWindow(ids: ["a", "b", "c", "d"]) { id in
+            loads.append(id)
+            return TestFixtures.makeCGImage(width: 4, height: 4, color: colors[id] ?? 0)
+        }
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+        XCTAssertEqual(window.images.count, 4)
+        let loadsBefore = loads.count
+
+        // Drop "b" and reverse the rest.
+        window.retarget(ids: ["d", "c", "a"])
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+
+        XCTAssertEqual(window.count, 3)
+        XCTAssertEqual(window.ids, ["d", "c", "a"])
+        XCTAssertEqual(firstByte(of: window.image(at: 0)), 40, "d keeps its pixels at its new position")
+        XCTAssertEqual(firstByte(of: window.image(at: 1)), 30, "c keeps its pixels")
+        XCTAssertEqual(firstByte(of: window.image(at: 2)), 10, "a keeps its pixels")
+        XCTAssertEqual(loads.count, loadsBefore, "a retarget must not re-decode resident images")
+    }
+
+    /// A load that completes after a retarget must land at the identity's new
+    /// position, never at the stale one (which may now hold another photo).
+    func testInFlightLoadLandsAtTheIdentitysNewPositionAfterRetarget() async {
+        let gate = AsyncGate()
+        let colors: [String: UInt8] = ["a": 10, "b": 20, "c": 30]
+        let window = identifiedWindow(ids: ["a", "b", "c"], radius: 1) { id in
+            await gate.wait()
+            return TestFixtures.makeCGImage(width: 4, height: 4, color: colors[id] ?? 0)
+        }
+        window.setCurrent(0)          // loads a, b (radius 1) — both parked on the gate
+        window.retarget(ids: ["c", "a"])
+        window.setCurrent(0)          // window is c, a — a is still in flight from before
+        await gate.open()
+        await window.waitUntilSettled()
+
+        XCTAssertEqual(window.ids, ["c", "a"])
+        XCTAssertEqual(firstByte(of: window.image(at: 0)), 30, "c is at position 0")
+        XCTAssertEqual(firstByte(of: window.image(at: 1)), 10,
+                       "a's pre-retarget load must land at a's new position")
+        XCTAssertNil(window.image(at: 2))
+    }
+
+    /// A queued load whose identity left the projection is cancelled, so it
+    /// never spends the decode.
+    func testRetargetCancelsQueuedLoadForDroppedIdentity() async {
+        let decoded = Counter()
+        let window = identifiedWindow(ids: ["keep", "drop"]) { id in
+            // Cancellation-aware pause standing in for the decode: a cancelled
+            // load returns here instead of spending the work.
+            guard (try? await Task.sleep(nanoseconds: 150_000_000)) != nil else { return nil }
+            decoded.append(id)
+            return TestFixtures.makeCGImage(width: 4, height: 4, color: 1)
+        }
+        window.setCurrent(0)
+        window.retarget(ids: ["keep"])
+        await window.waitUntilSettled()
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertFalse(decoded.contains("drop"),
+                       "a load for a dropped identity must be cancelled before decoding")
+        XCTAssertTrue(decoded.contains("keep"), "the surviving identity still loads")
+        XCTAssertNotNil(window.image(at: 0))
+    }
+}
+
+/// Async gate for tests: loaders park on it until the test opens it. Unlike a
+/// `DispatchSemaphore` it suspends the task instead of blocking a thread.
+private actor AsyncGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func open() {
+        isOpen = true
+        let pending = waiters
+        waiters = []
+        for continuation in pending { continuation.resume() }
+    }
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
 }

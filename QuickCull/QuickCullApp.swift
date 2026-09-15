@@ -19,6 +19,7 @@ extension FocusedValues {
 struct QuickCullApp: App {
     @State private var appState = AppState()
     @State private var monitor: KeyboardMonitor?
+    @State private var terminateObserver: NSObjectProtocol?
 
     @FocusedValue(\.newSessionAction) private var newSessionAction
 
@@ -28,31 +29,47 @@ struct QuickCullApp: App {
                 .environment(appState)
                 .frame(minWidth: 900, minHeight: 600)
                 .task {
+                    // Both calls are idempotent: a second window (or a restored
+                    // scene) must not wipe the cache the running session is
+                    // reading from, nor stack a second app-wide key monitor.
                     appState.prepareForLaunch()
+                    guard monitor == nil else { return }
                     let m = KeyboardMonitor()
                     m.start(appState: appState)
                     monitor = m
                     // Best-effort cache wipe on normal quit. Not guaranteed
                     // (force-quit skips it). The launch wipe is authoritative.
-                    NotificationCenter.default.addObserver(
+                    // `cache` is captured here (main actor) rather than read
+                    // inside the Sendable observer closure.
+                    let cache = appState.cache
+                    terminateObserver = NotificationCenter.default.addObserver(
                         forName: NSApplication.willTerminateNotification,
                         object: nil, queue: .main) { _ in
-                        let cache = appState.cache
                         Task { try? await cache.wipe() }
                     }
                 }
                 .onDisappear {
                     // Per-window monitor: stop it when the window closes so
-                    // duplicate monitors don't double-fire after Cmd+N reopens.
+                    // duplicate monitors don't double-fire after reopening.
                     monitor?.stop()
                     monitor = nil
+                    if let terminateObserver {
+                        NotificationCenter.default.removeObserver(terminateObserver)
+                        self.terminateObserver = nil
+                    }
                 }
         }
         .commands {
+            // The standard New Window command stays (it is how a closed window
+            // is reopened); a second window is harmless now that the launch
+            // wipe and the key monitor are one-shot. New Session is the action
+            // this app actually needs, so it gets its own shortcut.
             CommandGroup(after: .newItem) {
-                Button("New Session") {
-                    newSessionAction?()
-                }
+                Button("New Session") { newSessionAction?() }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    // The focused value is nil while a commit/move is in flight
+                    // (ScrubView withholds it), which disables the command.
+                    .disabled(newSessionAction == nil)
             }
         }
     }

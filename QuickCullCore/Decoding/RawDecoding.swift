@@ -4,16 +4,11 @@ import Foundation
 public struct DecodeOptions: Sendable, Equatable {
     public var demosaicQuality: Int
     public var medianPasses: Int
-    public var useRawSpeedIfAvailable: Bool
     public var jpegQuality: CGFloat
-    public var cacheMode: CacheMode
-    public enum CacheMode: Sendable, Equatable { case fullRes, displayRes }
-    public init(demosaicQuality: Int = 3, medianPasses: Int = 0, useRawSpeedIfAvailable: Bool = false, jpegQuality: CGFloat = 0.75, cacheMode: CacheMode = .fullRes) {
+    public init(demosaicQuality: Int = 3, medianPasses: Int = 0, jpegQuality: CGFloat = 0.75) {
         self.demosaicQuality = min(3, max(0, demosaicQuality))
         self.medianPasses = min(8, max(0, medianPasses))
-        self.useRawSpeedIfAvailable = useRawSpeedIfAvailable
         self.jpegQuality = min(0.95, max(0.5, jpegQuality))
-        self.cacheMode = cacheMode
     }
     public static let v1 = DecodeOptions()
 }

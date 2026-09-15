@@ -3,15 +3,15 @@ set -euo pipefail
 # bench-decode.sh — cold import benchmark for DecodeEngine
 # Usage: ./Scripts/bench-decode.sh [--runs 3] [--knobs "quality:0.70,demosaic:0"] [--compare baseline.csv]
 # - builds Release QuickCullCore, runs DecodeEngine on Fixtures/raws (8) × runs, reports mean/p95
-# - with --knobs, constructs DecodeOptions and re-runs; prints CSV and % delta
+# - --knobs PREVIEWS the mapping to DecodeOptions only: the harness always runs
+#   DecodeOptions.v1, so a candidate knob has to be wired in code before benching
 # - gate: ticket only if totalImportMs improves >10% and visual PSNR check passes (manual)
 #
 # Bench matrix (documented gate — run each candidate individually, never combined for ship decision):
-#   baseline .v1 (AHD 3, q75, fullRes) vs q70, demosaic 0, displayRes — each vs baseline isolated
-#   - baseline: DecodeOptions.v1 — demosaicQuality 3 (AHD), jpegQuality 0.75, cacheMode .fullRes
+#   baseline .v1 (AHD 3, q75) vs q70 and demosaic 0 — each vs baseline isolated
+#   - baseline: DecodeOptions.v1 — demosaicQuality 3 (AHD), jpegQuality 0.75
 #   - candidate q70: DecodeOptions(v1) with jpegQuality 0.70
 #   - candidate demosaic 0: DecodeOptions(v1) with demosaicQuality 0 (bilinear)
-#   - candidate displayRes: DecodeOptions(v1) with cacheMode .displayRes
 #   Gate: only if totalImportMs improves >10% vs baseline AND visual PSNR check passes (manual).
 #
 # Global constraints preserved: REAL RAW ONLY (libraw_dcraw_process full-res), BLOCKING GUARANTEE,
@@ -38,15 +38,16 @@ usage() {
 bench-decode — cold import benchmark for DecodeEngine
 Usage: ./Scripts/bench-decode.sh [--runs N] [--knobs "quality:0.70,demosaic:0"] [--compare baseline.csv] [--help]
   --runs N        Number of cold-cache runs (default 3, fixture set 8 RAWs × runs)
-  --knobs STR     Candidate knobs: comma-separated key:value (quality, demosaic, median, cacheMode)
-                  Constructs DecodeOptions and re-runs; prints CSV and % delta vs baseline
-                  e.g. --knobs "quality:0.70" --knobs "demosaic:0" --knobs "cacheMode:displayRes"
+  --knobs STR     Candidate knobs: comma-separated key:value (quality, demosaic, median)
+                  Preview only: the mapping to DecodeOptions is printed, the harness
+                  still runs DecodeOptions.v1 — wire the knob in code to bench it
+                  e.g. --knobs "quality:0.70" --knobs "demosaic:0"
   --compare CSV   Comparison mode: compare current bench.csv vs baseline.csv, report % delta
   --help, -h      Show this help
 Derived data: derivedDataPath /tmp/qc-bench
 CSV output: /tmp/qc-bench/bench.csv with columns file,width,height,totalMs,openMs,processMs,encodeMs
 Gate: ship only if totalImportMs improves >10% vs baseline + visual PSNR check passes (manual)
-Bench matrix: baseline .v1 (AHD 3, q75, fullRes) vs q70, demosaic 0, displayRes individually
+Bench matrix: baseline .v1 (AHD 3, q75) vs q70, demosaic 0 individually
 EOF
 }
 
@@ -260,7 +261,8 @@ echo ""
 
 # Handle knobs → DecodeOptions mapping preview
 if [[ -n "$KNOBS" ]]; then
-    echo "[knobs] constructing DecodeOptions from .v1 with overrides: $KNOBS" >&2
+    echo "[knobs] preview of DecodeOptions(.v1) overrides: $KNOBS" >&2
+    echo "[knobs] note: preview only — the harness runs .v1, so wire the candidate in code" >&2
     # Validate known keys
     IFS=',' read -ra PAIRS <<< "$KNOBS"
     for kv in "${PAIRS[@]}"; do
@@ -268,9 +270,7 @@ if [[ -n "$KNOBS" ]]; then
             quality:*|jpegQuality:*|q70|q75) echo "  -> jpegQuality override: $kv" >&2 ;;
             demosaic:*|user_qual:*|demosaicQuality:*) echo "  -> demosaicQuality override: $kv" >&2 ;;
             median:*|med_passes:*) echo "  -> medianPasses override: $kv" >&2 ;;
-            cacheMode:*|displayRes|fullRes) echo "  -> cacheMode override: $kv" >&2 ;;
-            useRawSpeedIfAvailable:*|use_rawspeed:*) echo "  -> useRawSpeedIfAvailable override: $kv" >&2 ;;
-            *) echo "  -> knob: $kv (passed to DecodeOptions)" >&2 ;;
+            *) echo "  -> unknown knob: $kv (no DecodeOptions field)" >&2 ;;
         esac
     done
     echo "" >&2
