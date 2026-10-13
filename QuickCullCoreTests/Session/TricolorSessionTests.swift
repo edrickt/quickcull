@@ -35,6 +35,42 @@ final class TricolorSessionTests: XCTestCase {
         XCTAssertEqual(s.flaggedFiles(.red).count, 1)
         XCTAssertEqual(s.flaggedFiles().count, 3)
     }
+    func testFilterCombinations() {
+        var files = TestFixtures.makeFiles(["a.jpg","b.jpg","c.jpg","d.jpg"])
+        let s = Session(files: files)
+        _ = s.toggleFlag(color: .red) // a red
+        s.move(by: 1); _ = s.toggleFlag(color: .yellow) // b yellow
+        s.move(by: 1); _ = s.toggleFlag(color: .green) // c green
+        // d unflagged
+        s.setFilter([.red, .yellow]); XCTAssertEqual(s.files.count, 2)
+        XCTAssertEqual(Set(s.files.map(\.id)), Set([files[0].id, files[1].id]))
+        s.setFilter([.red, .keepers]); XCTAssertEqual(s.files.count, 2) // a, d
+        s.setFilter([.yellow, .green, .keepers]); XCTAssertEqual(s.files.count, 3)
+        XCTAssertEqual(Set(s.files.map(\.id)), Set([files[1].id, files[2].id, files[3].id]))
+        s.setFilter([.red, .yellow, .green, .keepers]); XCTAssertEqual(s.files.count, 4)
+        // Removing a component narrows the combination in place.
+        let full: CullFilter = [.red, .yellow, .green, .keepers]
+        s.setFilter(full.subtracting(.keepers))
+        XCTAssertEqual(s.files.count, 3)
+        // Empty combination = All.
+        s.setFilter([]); XCTAssertEqual(s.files.count, 4); XCTAssertEqual(s.filter, .all)
+    }
+    func testFlagChangeUnderCombinationFilter() {
+        let files = TestFixtures.makeFiles(["a.jpg","b.jpg"])
+        let s = Session(files: files)
+        _ = s.toggleFlag(color: .red) // a red
+        s.move(by: 1); _ = s.toggleFlag(color: .yellow) // b yellow
+        s.setFilter([.red, .yellow]) // [a, b], current a
+        s.setIndex(1)
+        // Re-flagging the current photo within the combination keeps it visible.
+        _ = s.toggleFlag(color: .green) // b: yellow → green, still in [.red, .yellow]? no
+        XCTAssertEqual(s.files.count, 1) // only a remains
+        // An emptying combination falls back to All with the photo kept.
+        _ = s.toggleFlag(color: .red) // a: red → unflagged, drops out
+        XCTAssertEqual(s.filter, .all)
+        XCTAssertEqual(s.files.count, files.count)
+        XCTAssertEqual(s.currentFile.id, files[0].id)
+    }
     func testRemovePerColorLeavesOthers() {
         let files = TestFixtures.makeFiles(["a.jpg","b.jpg","c.jpg"])
         let s = Session(files: files)

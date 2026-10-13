@@ -32,6 +32,8 @@ public final class Session {
     public var flaggedFiles: [SessionFile] { flaggedFiles(nil) }
     public func isFlagged(_ file: SessionFile) -> Bool { flags[file.id] != nil }
     public func isFlagged(_ file: SessionFile, color: FlagColor) -> Bool { flags[file.id] == color }
+    /// The active filter combination (empty = `.all`). The `files` visible
+    /// sequence is `allFiles` projected under it.
     public private(set) var filter: CullFilter = .all
 
     /// The full post-commit file list; `files` is its projection under
@@ -79,13 +81,7 @@ public final class Session {
     // MARK: Filtering
 
     private func matches(_ file: SessionFile, _ filter: CullFilter) -> Bool {
-        switch filter {
-        case .all: return true
-        case .red: return flags[file.id] == .red
-        case .yellow: return flags[file.id] == .yellow
-        case .green: return flags[file.id] == .green
-        case .keepers: return flags[file.id] == nil
-        }
+        filter.isEmpty || filter.contains(CullFilter(matching: flags[file.id]))
     }
 
     private func projection(for filter: CullFilter) -> [SessionFile] {
@@ -98,8 +94,8 @@ public final class Session {
         idPositions[file.id] ?? 0
     }
 
-    /// Switches the visible sequence to `filter`. The current photo stays
-    /// current when it still matches; otherwise the nearest match in full
+    /// Switches the visible sequence to `filter` (a combination; empty =
+    /// All). The current photo stays current when it still matches; otherwise the nearest match in full
     /// list order takes over, ties resolving forward. A filter matching
     /// nothing yields an empty projection (placeholder) with `files==[]`,
     /// not a fallback to All — the grid shows "No photos in this filter".

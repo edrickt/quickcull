@@ -35,15 +35,22 @@ enum BarContent {
         }
         .pickerStyle(.segmented)
     }
+    // Multi-select filter segments (mirror of ScrubView.filterPicker —
+    // keep in sync): plain buttons in an HStack inside a quaternary-filled
+    // group, with the same padding as production.
     static func filterPicker() -> some View {
-        Picker("Filter", selection: .constant(0)) {
-            Text("All").tag(0)
-            Text("R (12)").tag(1)
-            Text("Y (4)").tag(2)
-            Text("G (7)").tag(3)
-            Text("Unflagged (103)").tag(4)
+        HStack(spacing: 2) {
+            ForEach(0..<5, id: \.self) { _ in
+                Button(action: {}) {
+                    Text("All")
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .pickerStyle(.segmented)
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
     }
     @ViewBuilder
     static func actions() -> some View {

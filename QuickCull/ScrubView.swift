@@ -233,29 +233,88 @@ struct ScrubView: View {
         .disabled(appState.isCommitting || appState.isMoving)
     }
 
+    /// Multi-select filter segments: either All, or any combination of
+    /// red/yellow/green/unflagged. A segmented Picker is single-select, so
+    /// these are plain buttons styled to sit alongside the view-mode picker;
+    /// selected segments highlight light blue (accent color).
     private var filterPicker: some View {
         let counts = flagCounts
-        return Picker("Filter", selection: Binding(
-            get: { appState.session?.filter ?? .all },
-            set: { appState.setFilter($0) }
-        )) {
-            Text("All").tag(CullFilter.all)
-            FlagColor.red.segmentDot
-                .tag(CullFilter.red)
-                .accessibilityLabel("Red (\(counts.red))")
-            FlagColor.yellow.segmentDot
-                .tag(CullFilter.yellow)
-                .accessibilityLabel("Yellow (\(counts.yellow))")
-            FlagColor.green.segmentDot
-                .tag(CullFilter.green)
-                .accessibilityLabel("Green (\(counts.green))")
-            Image(systemName: "flag")
-                .tag(CullFilter.keepers)
-                .accessibilityLabel("Unflagged (\(counts.unflagged))")
+        let filter = appState.session?.filter ?? .all
+        return HStack(spacing: 2) {
+            filterSegment(selected: filter.isEmpty, accessibility: "All") {
+                appState.setFilter(.all)
+            } label: {
+                Text("All")
+            }
+            filterSegment(selected: filter.contains(.red),
+                          accessibility: "Red (\(counts.red))") {
+                toggleFilterComponent(.red)
+            } label: {
+                FlagColor.red.segmentDot
+            }
+            filterSegment(selected: filter.contains(.yellow),
+                          accessibility: "Yellow (\(counts.yellow))") {
+                toggleFilterComponent(.yellow)
+            } label: {
+                FlagColor.yellow.segmentDot
+            }
+            filterSegment(selected: filter.contains(.green),
+                          accessibility: "Green (\(counts.green))") {
+                toggleFilterComponent(.green)
+            } label: {
+                FlagColor.green.segmentDot
+            }
+            filterSegment(selected: filter.contains(.keepers),
+                          accessibility: "Unflagged (\(counts.unflagged))") {
+                toggleFilterComponent(.keepers)
+            } label: {
+                Image(systemName: "flag")
+            }
         }
-        .pickerStyle(.segmented)
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
         .fontWeight(.light)
         .disabled(appState.isCommitting || appState.isMoving)
+    }
+
+    /// One filter segment: a plain button with a light-blue highlight when
+    /// its filter component is part of the active combination.
+    private func filterSegment<Content: View>(
+        selected: Bool,
+        accessibility: String,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Content
+    ) -> some View {
+        Button(action: action) {
+            label()
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(selected ? Color.accentColor.opacity(0.28) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibility)
+    }
+
+    /// Multi-select toggle: tapping a component adds/removes it from the
+    /// active combination; deselecting the last component returns to All
+    /// (the invariant: either All, or a non-empty combination).
+    private func toggleFilterComponent(_ component: CullFilter) {
+        guard let session = appState.session else { return }
+        var next = session.filter
+        if next.isEmpty {
+            next = component
+        } else if next == component {
+            next = []
+        } else if next.contains(component) {
+            next.remove(component)
+        } else {
+            next.insert(component)
+        }
+        appState.setFilter(next)
     }
 
     @ViewBuilder
