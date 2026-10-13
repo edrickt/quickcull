@@ -25,7 +25,15 @@ struct ScrubView: View {
                 ImportFailuresBanner(failures: appState.importFailures,
                                      onDismiss: { appState.dismissImportFailures() })
             }
+            // zIndex lifts the control bar above its later VStack siblings
+            // (ImageDisplayView/GridView/Filmstrip). Without it, the
+            // DropdownMenu panels — which overhang below the bar's bounds —
+            // are drawn UNDER those siblings: invisible, and every click on
+            // a panel item lands on the image/grid area instead
+            // ("nothing happens" on Trash/Move). zIndex orders the whole
+            // controlBar subtree above the siblings that follow it here.
             controlBar
+                .zIndex(1)
             if appState.viewMode == .grid {
                 GridView()
             } else {
