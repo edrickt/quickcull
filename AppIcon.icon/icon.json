@@ -1,0 +1,26 @@
+{
+  "fill" : {
+    "solid" : "extended-srgb:1.00000,1.00000,1.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "name" : "Monogram",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0
+      },
+      "layers" : [
+        {
+          "glass" : false,
+          "image-name" : "glyph.png",
+          "name" : "QC"
+        }
+      ]
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

@@ -11,6 +11,7 @@
 		C10000000000000000000006 /* libraw.dylib in Embed Libraries */ = {isa = PBXBuildFile; fileRef = C10000000000000000000004 /* libraw.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		C10000000000000000000007 /* QuickCullCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* QuickCullCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		A1000000000000000000002E /* Licenses in Copy Licenses */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002D /* Licenses */; };
+		C10000000000000000000009 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000010 /* AppIcon.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -72,6 +73,7 @@
 		B10000000000000000000004 /* QuickCullCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuickCullCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000000000000000000004 /* libraw.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libraw.dylib; path = Build/libraw/libraw.dylib; sourceTree = "<group>"; };
 		A1000000000000000000002D /* Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "QuickCull/Resources/Licenses"; sourceTree = "<group>"; };
+		C10000000000000000000010 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -139,6 +141,7 @@
 				B10000000000000000000002 /* QuickCullCoreTests */,
 				C10000000000000000000005 /* Build */,
 				A1000000000000000000002D /* Licenses */,
+				C10000000000000000000010 /* AppIcon.icon */,
 				A10000000000000000000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -296,6 +299,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C10000000000000000000009 /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -452,9 +456,10 @@
 		A10000000000000000000017 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_HARDENED_RUNTIME = NO; /* ad-hoc local signing + library validation are incompatible; re-enable with Developer ID */
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -472,9 +477,10 @@
 		A10000000000000000000018 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_HARDENED_RUNTIME = NO; /* ad-hoc local signing + library validation are incompatible; re-enable with Developer ID */
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
