@@ -69,6 +69,10 @@ struct DropdownMenu<Label: View>: View {
         } label: {
             label
         }
+        // The label carries its own visible face (ScrubView.BarIconFace);
+        // the default bordered style would draw a second system bezel
+        // around it.
+        .buttonStyle(.plain)
         .background(FrameAnchor { frame, width in
             // Written during the AppKit layout pass. The toggle frame feeds
             // `panelXOffset`, so it does have to invalidate layout.
