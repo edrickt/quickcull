@@ -52,9 +52,12 @@ enum BarContent {
         .padding(2)
         .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
     }
+    // Metadata toggle sits at the end of the pickers group (ScrubView.metadataButton).
+    static func metadataButton() -> some View {
+        Button(action: {}) { Text("Show Metadata") }
+    }
     @ViewBuilder
     static func actions() -> some View {
-        Button("Show Metadata") {}
         Button {} label: { Label("Move Flagged to Trash", systemImage: "trash") }
         Button {} label: { Label("Move Flagged", systemImage: "folder") }
     }
@@ -74,6 +77,7 @@ struct ControlBarLayout: View {
             HStack(spacing: 12) {
                 BarContent.viewPicker()
                 BarContent.filterPicker()
+                BarContent.metadataButton()
                 Spacer()
                 BarContent.actions()
             }
@@ -84,6 +88,7 @@ struct ControlBarLayout: View {
                 HStack(spacing: 12) {
                     BarContent.viewPicker()
                     BarContent.filterPicker()
+                    BarContent.metadataButton()
                     Spacer()
                 }
                 HStack(spacing: 12) {

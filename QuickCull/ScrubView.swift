@@ -132,9 +132,9 @@ struct ScrubView: View {
         return { showNewSessionConfirm = true }
     }
 
-    /// View-mode/filter segmented pickers and all action buttons
-    /// (metadata toggle, trash, move; New Session lives in the menu bar's
-    /// File menu).
+    /// View-mode/filter segmented pickers, the metadata toggle (at the end
+    /// of the pickers group), and all action buttons (trash, move; New
+    /// Session lives in the menu bar's File menu).
     /// They live here (not in the window toolbar) so the toolbar stays
     /// narrow enough to never overflow into the chevron: on macOS 26 a
     /// SwiftUI toolbar item crossing the overflow threshold during a
@@ -171,6 +171,7 @@ struct ScrubView: View {
         HStack(spacing: 12) {
             viewModePicker
             filterPicker
+            metadataButton
             Spacer()
             actionButtons
         }
@@ -181,6 +182,7 @@ struct ScrubView: View {
             HStack(spacing: 12) {
                 viewModePicker
                 filterPicker
+                metadataButton
                 Spacer()
             }
             // Actions anchored left, aligned under the pickers above.
@@ -317,10 +319,9 @@ struct ScrubView: View {
         appState.setFilter(next)
     }
 
-    @ViewBuilder
-    private var actionButtons: some View {
-        let counts = flagCounts
-        let busy = appState.isCommitting || appState.isMoving
+    /// Metadata HUD toggle. Sits at the end of the pickers group (after the
+    /// filter segments), separate from the commit/move actions.
+    private var metadataButton: some View {
         Button {
             hudVisible.toggle()
         } label: {
@@ -329,7 +330,13 @@ struct ScrubView: View {
         .fontWeight(.light)
         .help(hudVisible ? "Hide metadata" : "Show metadata")
         .accessibilityLabel("Toggle metadata")
-            .disabled(busy)
+        .disabled(appState.isCommitting || appState.isMoving)
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        let counts = flagCounts
+        let busy = appState.isCommitting || appState.isMoving
         DropdownMenu(items: [
             .init("Trash R (\(counts.red))", destructive: true,
                   disabled: counts.red == 0 || busy,
