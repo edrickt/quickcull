@@ -167,6 +167,11 @@ struct ScrubView: View {
         }
     }
 
+    /// Common control height for the bar's controls: matches the segmented
+    /// view-mode picker's natural 24pt so the filter group, metadata toggle,
+    /// and trash/move dropdowns all align.
+    private static let barControlHeight: CGFloat = 24
+
     private var singleRowBar: some View {
         HStack(spacing: 12) {
             viewModePicker
@@ -274,6 +279,7 @@ struct ScrubView: View {
             }
         }
         .padding(2)
+        .frame(height: Self.barControlHeight)
         .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
         .fontWeight(.light)
         .disabled(appState.isCommitting || appState.isMoving)
@@ -290,7 +296,10 @@ struct ScrubView: View {
         Button(action: action) {
             label()
                 .padding(.horizontal, 9)
-                .padding(.vertical, 3)
+                .padding(.vertical, 2)
+                // Uniform segment fill height: a text segment ("All") and a
+                // dot segment highlight to the same rounded rectangle.
+                .frame(minHeight: Self.barControlHeight - 4)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
                         .fill(selected ? Color.accentColor.opacity(0.28) : Color.clear)
@@ -328,6 +337,7 @@ struct ScrubView: View {
             Image(systemName: "info.circle")
         }
         .fontWeight(.light)
+        .frame(height: Self.barControlHeight)
         .help(hudVisible ? "Hide metadata" : "Show metadata")
         .accessibilityLabel("Toggle metadata")
         .disabled(appState.isCommitting || appState.isMoving)
@@ -366,6 +376,7 @@ struct ScrubView: View {
             }
         }
         .disabled(busy)
+        .frame(height: Self.barControlHeight)
         .help("Move flagged to trash")
         DropdownMenu(items: [
             .init("Move R (\(counts.red))",
@@ -404,6 +415,7 @@ struct ScrubView: View {
             }
         }
         .disabled(busy)
+        .frame(height: Self.barControlHeight)
         .help("Move flagged to folder…")
     }
 

@@ -37,29 +37,34 @@ enum BarContent {
     }
     // Multi-select filter segments (mirror of ScrubView.filterPicker —
     // keep in sync): plain buttons in an HStack inside a quaternary-filled
-    // group, with the same padding as production.
+    // group, with the same padding and 24pt control height as production.
     static func filterPicker() -> some View {
         HStack(spacing: 2) {
             ForEach(0..<5, id: \.self) { _ in
                 Button(action: {}) {
                     Text("All")
                         .padding(.horizontal, 9)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 2)
+                        .frame(minHeight: 20)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(2)
+        .frame(height: 24)
         .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
     }
     // Metadata toggle sits at the end of the pickers group (ScrubView.metadataButton).
     static func metadataButton() -> some View {
         Button(action: {}) { Text("Show Metadata") }
+            .frame(height: 24)
     }
     @ViewBuilder
     static func actions() -> some View {
         Button {} label: { Label("Move Flagged to Trash", systemImage: "trash") }
+            .frame(height: 24)
         Button {} label: { Label("Move Flagged", systemImage: "folder") }
+            .frame(height: 24)
     }
 }
 
