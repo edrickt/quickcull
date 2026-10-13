@@ -328,6 +328,21 @@ struct ScrubView: View {
         appState.setFilter(next)
     }
 
+    /// Visible face for the bar's single-icon buttons (metadata, trash,
+    /// move): the default bordered bezel hugs the glyph, which read visually
+    /// smaller than the segmented picker and filter group even at the same
+    /// frame height. A quaternary rounded rect at the shared control height
+    /// matches the filter group's fill so every control reads the same size.
+    private struct BarIconFace: ViewModifier {
+        func body(content: Content) -> some View {
+            content
+                .padding(.horizontal, 8)
+                .frame(height: ScrubView.barControlHeight)
+                .background(RoundedRectangle(cornerRadius: 5).fill(.quaternary))
+                .contentShape(Rectangle())
+        }
+    }
+
     /// Metadata HUD toggle. Sits at the end of the pickers group (after the
     /// filter segments), separate from the commit/move actions.
     private var metadataButton: some View {
@@ -335,9 +350,10 @@ struct ScrubView: View {
             hudVisible.toggle()
         } label: {
             Image(systemName: "info.circle")
+                .modifier(BarIconFace())
         }
+        .buttonStyle(.plain)
         .fontWeight(.light)
-        .frame(height: Self.barControlHeight)
         .help(hudVisible ? "Hide metadata" : "Show metadata")
         .accessibilityLabel("Toggle metadata")
         .disabled(appState.isCommitting || appState.isMoving)
@@ -369,14 +385,16 @@ struct ScrubView: View {
                 appState.requestCommit(color: nil); showCommitConfirm = true
             },
         ]) {
-            if appState.isCommitting {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: "trash")
+            Group {
+                if appState.isCommitting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "trash")
+                }
             }
+            .modifier(BarIconFace())
         }
         .disabled(busy)
-        .frame(height: Self.barControlHeight)
         .help("Move flagged to trash")
         DropdownMenu(items: [
             .init("Move R (\(counts.red))",
@@ -408,14 +426,16 @@ struct ScrubView: View {
                 }
             },
         ]) {
-            if appState.isMoving {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: "folder")
+            Group {
+                if appState.isMoving {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "folder")
+                }
             }
+            .modifier(BarIconFace())
         }
         .disabled(busy)
-        .frame(height: Self.barControlHeight)
         .help("Move flagged to folder…")
     }
 

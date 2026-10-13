@@ -55,16 +55,36 @@ enum BarContent {
         .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
     }
     // Metadata toggle sits at the end of the pickers group (ScrubView.metadataButton).
+    // Single-icon buttons carry a BarIconFace: quaternary rounded rect at
+    // the shared 24pt control height.
     static func metadataButton() -> some View {
-        Button(action: {}) { Text("Show Metadata") }
-            .frame(height: 24)
+        Button(action: {}) {
+            Image(systemName: "info.circle")
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: 5).fill(.quaternary))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
     @ViewBuilder
     static func actions() -> some View {
-        Button {} label: { Label("Move Flagged to Trash", systemImage: "trash") }
-            .frame(height: 24)
-        Button {} label: { Label("Move Flagged", systemImage: "folder") }
-            .frame(height: 24)
+        Button {} label: {
+            Image(systemName: "trash")
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: 5).fill(.quaternary))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        Button {} label: {
+            Image(systemName: "folder")
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: 5).fill(.quaternary))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -201,10 +221,16 @@ if wideMaxY > oneRowBarHeight {
 }
 // In the two-row bar at 900pt the action buttons must be anchored left,
 // aligned under the pickers (minX at the padding edge, not pushed right).
-let narrowButtons = narrow.filter(\.isButton)
-if let leftmostButton = narrowButtons.map(\.minX).min(), leftmostButton > 40 {
-    print("FAIL: leftmost action button starts at x=\(String(format: "%.0f", leftmostButton)) at \(Int(minWindowWidth))pt — action row is not left-anchored")
-    failures += 1
+// Only applies when the two-row variant is actually selected: with the
+// icon-based buttons the one-row bar usually fits at 900pt (actions then
+// sit right of the Spacer by design).
+let twoRowSelected = narrowMaxY > oneRowBarHeight
+if twoRowSelected {
+    let narrowButtons = narrow.filter(\.isButton)
+    if let leftmostButton = narrowButtons.map(\.minX).min(), leftmostButton > 40 {
+        print("FAIL: leftmost action button starts at x=\(String(format: "%.0f", leftmostButton)) at \(Int(minWindowWidth))pt — action row is not left-anchored")
+        failures += 1
+    }
 }
 if isClipped(narrowHost, width: minWindowWidth) { failures += 1 }
 
