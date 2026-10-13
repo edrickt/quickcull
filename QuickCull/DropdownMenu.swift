@@ -21,13 +21,20 @@ struct DropdownMenu<Label: View>: View {
         let title: String
         let destructive: Bool
         let disabled: Bool
+        /// Optional leading SF Symbol (e.g. a flag-colored dot); `nil` reserves
+        /// the icon column so rows with and without icons align.
+        let icon: String?
+        let iconColor: Color?
         let action: () -> Void
 
-        init(_ title: String, destructive: Bool = false, disabled: Bool = false, action: @escaping () -> Void) {
+        init(_ title: String, destructive: Bool = false, disabled: Bool = false,
+             icon: String? = nil, iconColor: Color? = nil, action: @escaping () -> Void) {
             self.id = title
             self.title = title
             self.destructive = destructive
             self.disabled = disabled
+            self.icon = icon
+            self.iconColor = iconColor
             self.action = action
         }
     }
@@ -101,6 +108,16 @@ struct DropdownMenu<Label: View>: View {
                     close()
                 } label: {
                     HStack(spacing: 8) {
+                        Group {
+                            if let systemImage = item.icon {
+                                Image(systemName: systemImage)
+                                    .font(.system(size: 10, weight: .bold))
+                            } else {
+                                Color.clear.frame(width: 10, height: 10)
+                            }
+                        }
+                        .frame(width: 12)
+                        .foregroundStyle(item.iconColor ?? Color.secondary)
                         Text(item.title)
                             .lineLimit(1)
                         Spacer(minLength: 0)

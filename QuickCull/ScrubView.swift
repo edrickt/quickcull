@@ -218,9 +218,15 @@ struct ScrubView: View {
             get: { appState.viewMode },
             set: { appState.setViewMode($0) }
         )) {
-            Text("Single").tag(AppState.ViewMode.scrub)
-            Text("Split").tag(AppState.ViewMode.split)
-            Text("Grid").tag(AppState.ViewMode.grid)
+            Image(systemName: "rectangle")
+                .tag(AppState.ViewMode.scrub)
+                .accessibilityLabel("Single")
+            Image(systemName: "rectangle.split.2x1")
+                .tag(AppState.ViewMode.split)
+                .accessibilityLabel("Split")
+            Image(systemName: "square.grid.2x2")
+                .tag(AppState.ViewMode.grid)
+                .accessibilityLabel("Grid")
         }
         .pickerStyle(.segmented)
         .fontWeight(.light)
@@ -234,10 +240,18 @@ struct ScrubView: View {
             set: { appState.setFilter($0) }
         )) {
             Text("All").tag(CullFilter.all)
-            Text("R (\(counts.red))").tag(CullFilter.red)
-            Text("Y (\(counts.yellow))").tag(CullFilter.yellow)
-            Text("G (\(counts.green))").tag(CullFilter.green)
-            Text("Unflagged (\(counts.unflagged))").tag(CullFilter.keepers)
+            FlagColor.red.segmentDot
+                .tag(CullFilter.red)
+                .accessibilityLabel("Red (\(counts.red))")
+            FlagColor.yellow.segmentDot
+                .tag(CullFilter.yellow)
+                .accessibilityLabel("Yellow (\(counts.yellow))")
+            FlagColor.green.segmentDot
+                .tag(CullFilter.green)
+                .accessibilityLabel("Green (\(counts.green))")
+            Image(systemName: "flag")
+                .tag(CullFilter.keepers)
+                .accessibilityLabel("Unflagged (\(counts.unflagged))")
         }
         .pickerStyle(.segmented)
         .fontWeight(.light)
@@ -248,56 +262,70 @@ struct ScrubView: View {
     private var actionButtons: some View {
         let counts = flagCounts
         let busy = appState.isCommitting || appState.isMoving
-        Button(hudVisible ? "Hide Metadata" : "Show Metadata") { hudVisible.toggle() }
-            .fontWeight(.light)
-            .help(hudVisible ? "Hide metadata" : "Show metadata")
+        Button {
+            hudVisible.toggle()
+        } label: {
+            Image(systemName: "info.circle")
+        }
+        .fontWeight(.light)
+        .help(hudVisible ? "Hide metadata" : "Show metadata")
+        .accessibilityLabel("Toggle metadata")
             .disabled(busy)
         DropdownMenu(items: [
             .init("Trash R (\(counts.red))", destructive: true,
-                  disabled: counts.red == 0 || busy) {
+                  disabled: counts.red == 0 || busy,
+                  icon: "circle.fill", iconColor: .red) {
                 appState.requestCommit(color: .red); showCommitConfirm = true
             },
             .init("Trash Y (\(counts.yellow))", destructive: true,
-                  disabled: counts.yellow == 0 || busy) {
+                  disabled: counts.yellow == 0 || busy,
+                  icon: "circle.fill", iconColor: .yellow) {
                 appState.requestCommit(color: .yellow); showCommitConfirm = true
             },
             .init("Trash G (\(counts.green))", destructive: true,
-                  disabled: counts.green == 0 || busy) {
+                  disabled: counts.green == 0 || busy,
+                  icon: "circle.fill", iconColor: .green) {
                 appState.requestCommit(color: .green); showCommitConfirm = true
             },
             .init("Trash All Flagged (\(counts.all))", destructive: true,
-                  disabled: counts.all == 0 || busy) {
+                  disabled: counts.all == 0 || busy,
+                  icon: "circle.fill") {
                 appState.requestCommit(color: nil); showCommitConfirm = true
             },
         ]) {
             if appState.isCommitting {
                 ProgressView().controlSize(.small)
             } else {
-                Label("Move Flagged to Trash", systemImage: "trash").fontWeight(.light)
+                Image(systemName: "trash")
             }
         }
         .disabled(busy)
+        .help("Move flagged to trash")
         DropdownMenu(items: [
             .init("Move R (\(counts.red))",
-                  disabled: counts.red == 0 || busy) {
+                  disabled: counts.red == 0 || busy,
+                  icon: "circle.fill", iconColor: .red) {
                 if let dest = chooseMoveDestination() {
                     appState.requestMove(to: dest, color: .red); showMoveConfirm = true
                 }
             },
             .init("Move Y (\(counts.yellow))",
-                  disabled: counts.yellow == 0 || busy) {
+                  disabled: counts.yellow == 0 || busy,
+                  icon: "circle.fill", iconColor: .yellow) {
                 if let dest = chooseMoveDestination() {
                     appState.requestMove(to: dest, color: .yellow); showMoveConfirm = true
                 }
             },
             .init("Move G (\(counts.green))",
-                  disabled: counts.green == 0 || busy) {
+                  disabled: counts.green == 0 || busy,
+                  icon: "circle.fill", iconColor: .green) {
                 if let dest = chooseMoveDestination() {
                     appState.requestMove(to: dest, color: .green); showMoveConfirm = true
                 }
             },
             .init("Move All Flagged (\(counts.all))",
-                  disabled: counts.all == 0 || busy) {
+                  disabled: counts.all == 0 || busy,
+                  icon: "circle.fill") {
                 if let dest = chooseMoveDestination() {
                     appState.requestMove(to: dest, color: nil); showMoveConfirm = true
                 }
@@ -306,10 +334,11 @@ struct ScrubView: View {
             if appState.isMoving {
                 ProgressView().controlSize(.small)
             } else {
-                Label("Move Flagged", systemImage: "folder").fontWeight(.light)
+                Image(systemName: "folder")
             }
         }
         .disabled(busy)
+        .help("Move flagged to folder…")
     }
 
     private func chooseMoveDestination() -> URL? {
