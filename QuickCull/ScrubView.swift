@@ -175,6 +175,7 @@ struct ScrubView: View {
     private var singleRowBar: some View {
         HStack(spacing: 12) {
             viewModePicker
+            filterLabel
             filterPicker
             metadataButton
             Spacer()
@@ -186,6 +187,7 @@ struct ScrubView: View {
         VStack(spacing: 8) {
             HStack(spacing: 12) {
                 viewModePicker
+                filterLabel
                 filterPicker
                 metadataButton
                 Spacer()
@@ -238,6 +240,14 @@ struct ScrubView: View {
         .pickerStyle(.segmented)
         .fontWeight(.light)
         .disabled(appState.isCommitting || appState.isMoving)
+    }
+
+    /// "Filter" caption to the left of the filter segments, matching the
+    /// view-mode picker's label treatment.
+    private var filterLabel: some View {
+        Text("Filter")
+            .fontWeight(.light)
+            .frame(height: Self.barControlHeight, alignment: .center)
     }
 
     /// Multi-select filter segments: either All, or any combination of
