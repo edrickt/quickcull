@@ -1,0 +1,23 @@
+step	unit	decision_or_hypothesis	evidence	result
+1	baseline	Suite is green before any change; 207 tests is the regression bar	xcrun xctest: 207 tests, 0 failures, 82.9 s	verified
+2	AUD-01	Same-folder move renames originals because the collision suffix finds the file itself	MoveCommitTests.testMoveIntoTheSourceFolderIsANoOp fails pre-fix	fixed
+3	AUD-02	The confirm dialog must commit the set it named, not a recomputed one	AppStateTests.testConfirmCommitsTheFilesTheDialogNamedEvenIfFlagsChange	fixed
+4	AUD-03	Command chords and modal/text input belong to the system, not the cull map	KeyRouterTests (6 cases); live picker typed /tmp/qc-shoot and all letters landed	fixed
+5	AUD-04	Batch flag must not reach photos hidden by the filter	AppStateTests.testGridFlagActionSkipsPhotosHiddenByTheFilter	fixed
+6	AUD-05	Key monitor and quit wipe are app-lifetime, not per window	deleted the per-window teardown; Release build green	fixed
+7	AUD-06	Landing on an in-flight reduced load must upgrade on completion	ImageWindowTests.testLandingOnAnInFlightReducedLoadUpgradesIt	fixed
+8	AUD-07	An empty filter projection must remember the current photo	SessionTests.testEmptyFilterPlaceholderKeepsTheCurrentPhotoForTheReturn	fixed
+9	AUD-08	Cache-write failure is not a decode failure	DecodeError.cannotStorePreview; DecodeEngine separates the boundaries	fixed
+10	AUD-09	The loupe must not claim 1:1 over a placeholder; backing scale is per pane	ImageWindowTests.testFullResolutionReflectsTheResidentTier	fixed
+11	AUD-10	Grid residency is a fixed viewport, not the shoot	ImageWindowTests.testGridResidencyIsBoundedByTheFixedCap (100 ensured, <=61 resident)	fixed
+12	AUD-11	Detached decode work must follow the caller's cancellation	detachedUnlessCancelled; existing Task.isCancelled guards become reachable	fixed
+13	AUD-12+13	Only the owning task clears its markers, and only after a token match	ImageWindowTests suite (settle + eviction + retarget cases) green	fixed
+14	AUD-14	Prune before evict, or the ensured set defeats the bound	100-thumb test now bounded at 61	fixed
+15	AUD-15	Hidden tier knobs are clamped to the window extent	ImageWindowTests.testFullResTierKnobsAreClampedToTheWindowExtent	fixed
+16	AUD-16+17	Blocking CPU work leaves the cooperative pool; encode leaves the cache actor	DecodeEngine offCooperativePool + autoreleasepool; storeJPEG nonisolated async	fixed
+17	AUD-18	Preview URLs are resolved before the commit because the key embeds size+mtime	AppStateTests.testSuccessfulCommitDeletesTheCachedPreview	fixed
+18	AUD-19+20	HUD resets, right-pane badge, per-pane pan clamp	Release build green; rendered result not visually confirmed	needs-eyes
+19	AUD-21+22+23+24+25	One owner per transition; revisions notify clears; precondition; O(1) contains	SessionTests.testRemoveKeepsPlaceholderFilterWhenTheProjectionWasAlreadyEmpty; AppStateTests.testUnsupportedOnlyImportClearsThePreviousSession	fixed
+20	AUD-26+27+28	sRGB tag, clean fixture install, a test that actually asserts	ImageMetadataProviderTests.testExifFieldsParsedIfPresent now strict	fixed
+21	tooling	The single-file Swift analyzer cannot type-check this project	107 workspace "errors" vs xcodebuild green and 226 passing tests; .pi-lens.json + AGENTS.md	recorded
+22	final	Predicate: builds green, suite green above baseline, audit recorded, branch pushed	xcodebuild Debug+Release green; 226 tests, 0 failures	verified

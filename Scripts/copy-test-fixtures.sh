@@ -6,6 +6,7 @@
 # tests look up via subdirectory: "Fixtures/raws".
 set -euo pipefail
 RES="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+rm -rf "$RES/Fixtures"
 for f in "$PROJECT_DIR"/QuickCullCoreTests/Fixtures/raws/*; do
   rm -f "$RES/$(basename "$f")"
 done
