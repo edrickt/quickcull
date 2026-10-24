@@ -112,26 +112,7 @@ public actor DecodeEngine {
                                 let signpostID = OSSignpostID(log: OSLog.decode)
                                 os_signpost(.begin, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}s", file.id)
                                 let t0 = CFAbsoluteTimeGetCurrent()
-                                let outcome: DecodeOutcome
-                                var benchWidth = 0
-                                var benchHeight = 0
-                                do {
-                                    let bitmap = try self.decoder.decodeRaw(at: file.url, options: self.options)
-                                    benchWidth = bitmap.width
-                                    benchHeight = bitmap.height
-                                    try await self.cache.storeJPEG(bitmap, for: file, quality: self.options.jpegQuality)
-                                    // Histogram sidecar is best-effort: its failure
-                                    // must never fail the import.
-                                    if let hist = bitmap.histogram {
-                                        try? await self.cache.storeHistogram(hist, for: file)
-                                    }
-                                    outcome = DecodeOutcome(file: file, error: nil)
-                                } catch let error as DecodeError {
-                                    outcome = DecodeOutcome(file: file, error: error)
-                                } catch {
-                                    outcome = DecodeOutcome(file: file,
-                                                            error: .cannotProcess("\(error)"))
-                                }
+                                let (outcome, benchWidth, benchHeight) = await self.decodeOne(file)
                                 let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
                                 self.benchmarkAccum.append(Benchmark(fileID: file.id, totalMs: totalMs, width: benchWidth, height: benchHeight))
                                 os_signpost(.end, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}s totalMs=%{public}f", file.id, totalMs)
@@ -147,6 +128,62 @@ public actor DecodeEngine {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+
+    /// One file: demosaic, then cache write. Returns the outcome plus the
+    /// bitmap dimensions for the benchmark log.
+    private func decodeOne(_ file: SessionFile) async -> (DecodeOutcome, Int, Int) {
+        let decoded = await Self.offCooperativePool { [decoder, options] in
+            // autoreleasepool: ImageIO and CF hand back autoreleased temporaries
+            // per file (source, properties, options dictionary). Without a pool
+            // they pile up for the whole import, one batch per worker.
+            autoreleasepool {
+                do {
+                    return DecodedBitmap(bitmap: try decoder.decodeRaw(at: file.url, options: options),
+                                         error: nil)
+                } catch let error as DecodeError {
+                    return DecodedBitmap(bitmap: nil, error: error)
+                } catch {
+                    return DecodedBitmap(bitmap: nil, error: .cannotProcess("\(error)"))
+                }
+            }
+        }
+        guard let bitmap = decoded.bitmap else {
+            return (DecodeOutcome(file: file, error: decoded.error ?? .invalidOutput), 0, 0)
+        }
+        do {
+            try await cache.storeJPEG(bitmap, for: file, quality: options.jpegQuality)
+        } catch {
+            // The cache is a separate boundary: a write failure is not a decode
+            // failure, and saying so is what lets a user free up disk instead
+            // of believing the photo is broken.
+            return (DecodeOutcome(file: file, error: .cannotStorePreview("\(error)")),
+                    bitmap.width, bitmap.height)
+        }
+        // Histogram sidecar is best-effort: its failure must never fail the import.
+        if let hist = bitmap.histogram {
+            try? await cache.storeHistogram(hist, for: file)
+        }
+        return (DecodeOutcome(file: file, error: nil), bitmap.width, bitmap.height)
+    }
+
+    /// Runs blocking CPU work on a dispatch queue rather than a cooperative
+    /// thread. A demosaic parks its thread for hundreds of milliseconds, and
+    /// the pool has one thread per core, so `workerCount` simultaneous decodes
+    /// on the pool would starve every other async task in the process.
+    private static func offCooperativePool<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: work())
+            }
+        }
+    }
+}
+
+/// A decode attempt crossing the dispatch boundary. `RawBitmap` holds an
+/// immutable `CGImage`, which is safe to hand between threads.
+private struct DecodedBitmap: @unchecked Sendable {
+    let bitmap: RawBitmap?
+    let error: DecodeError?
 }
 
 /// FIFO work queue shared by the worker pool. Two-stack layout: enqueue

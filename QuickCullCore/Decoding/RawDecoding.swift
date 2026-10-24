@@ -37,6 +37,10 @@ public enum DecodeError: Error, Equatable {
     case cannotOpen(String)
     case cannotUnpack(String)
     case cannotProcess(String)
+    /// The source decoded, but its preview could not be written to the cache.
+    /// A different failure class from the ones above: the file is fine, the
+    /// cache is not, and a user can act on that distinction.
+    case cannotStorePreview(String)
     case invalidOutput
 }
 

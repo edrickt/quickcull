@@ -43,7 +43,10 @@ public actor ImageCacheStore {
     /// When the source file cannot be stat-ed (deleted mid-session, or a
     /// synthetic/test file), falls back to the path-only key so the decoded
     /// bitmap can still be cached deterministically.
-    public func cacheURL(for file: SessionFile) throws -> URL {
+    ///
+    /// `nonisolated`: it reads no actor state, and every decode worker needs
+    /// it, so it must not queue behind the cache's isolation.
+    public nonisolated func cacheURL(for file: SessionFile) throws -> URL {
         var key = file.id
         if let attrs = try? FileManager.default.attributesOfItem(atPath: file.url.path) {
             let size = (attrs[.size] as? UInt64) ?? 0
@@ -60,9 +63,15 @@ public actor ImageCacheStore {
     /// The bitmap is already upright: `dcraw_process` applies the raw's flip
     /// to the pixel buffer before we ever see it. No EXIF orientation tag is
     /// written, so consumers must not transform the pixels again.
+    ///
+    /// `nonisolated` on purpose: the encode of a 45 MP frame is 100-400 ms of
+    /// CPU, and running it inside the actor would serialize every decode
+    /// worker behind one encoder. Only the directory check takes isolation;
+    /// each file has its own destination, so concurrent encodes cannot race.
     @discardableResult
-    public func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile, quality: CGFloat) throws -> URL {
-        try ensureBaseDir()
+    public nonisolated func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile,
+                                      quality: CGFloat) async throws -> URL {
+        try await ensureBaseDirExists()
         let destination = try cacheURL(for: file)
         let tmp = destination.appendingPathExtension("tmp")
         defer { try? FileManager.default.removeItem(at: tmp) }
@@ -86,15 +95,22 @@ public actor ImageCacheStore {
     }
 
     @discardableResult
-    public func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile) throws -> URL {
-        try storeJPEG(bitmap, for: file, quality: Self.jpegQuality)
+    public nonisolated func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile) async throws -> URL {
+        try await storeJPEG(bitmap, for: file, quality: Self.jpegQuality)
+    }
+
+    private func ensureBaseDirExists() throws {
+        try ensureBaseDir()
     }
 
     /// Sidecar URL for the raw histogram: same cache key, `.hist.json`.
-    public func histogramURL(for file: SessionFile) throws -> URL {
-        try cacheURL(for: file)
-            .appendingPathExtension("hist")
-            .appendingPathExtension("json")
+    public nonisolated func histogramURL(for file: SessionFile) throws -> URL {
+        Self.histogramURL(beside: try cacheURL(for: file))
+    }
+
+    /// The histogram sidecar that belongs beside a cached JPEG.
+    public nonisolated static func histogramURL(beside jpegURL: URL) -> URL {
+        jpegURL.appendingPathExtension("hist").appendingPathExtension("json")
     }
 
     /// Store the raw histogram as an atomic JSON sidecar next to the JPEG.
@@ -131,11 +147,17 @@ public actor ImageCacheStore {
 
     public func deleteCachedJPEG(for file: SessionFile) {
         if let url = try? cacheURL(for: file) {
-            try? FileManager.default.removeItem(at: url)
+            deleteCachedPreviews(at: url)
         }
-        if let url = try? histogramURL(for: file) {
-            try? FileManager.default.removeItem(at: url)
-        }
+    }
+
+    /// Deletes a preview and its histogram from a location resolved while the
+    /// source file still existed. The cache key embeds the source's size and
+    /// mtime, so after a trash or a move the key can no longer be recomputed:
+    /// callers resolve the URL first and pass it here.
+    public func deleteCachedPreviews(at jpegURL: URL) {
+        try? FileManager.default.removeItem(at: jpegURL)
+        try? FileManager.default.removeItem(at: Self.histogramURL(beside: jpegURL))
     }
 }
 

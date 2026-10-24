@@ -111,7 +111,13 @@ public final class LibRawDecoder: RawDecoding {
         guard let image = CGImage(width: Int(p.width), height: Int(p.height),
                                   bitsPerComponent: 8, bitsPerPixel: 24,
                                   bytesPerRow: Int(p.width) * 3,
-                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  // The demosaic is processed with
+                                  // `output_color = sRGB`, so tag the pixels
+                                  // with the space they are actually in. Device
+                                  // RGB left the cache JPEG untagged, which
+                                  // made colour-managed viewers guess.
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)
+                                      ?? CGColorSpaceCreateDeviceRGB(),
                                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
                                   provider: provider, decode: nil,
                                   shouldInterpolate: false, intent: .defaultIntent) else {
