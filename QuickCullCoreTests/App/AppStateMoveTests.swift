@@ -141,10 +141,12 @@ final class AppStateMoveTests: XCTestCase {
         await task.value
     }
 
-    func testUnsupportedImportClearsMoveState() {
+    func testUnsupportedImportClearsMoveState() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let s = makeState()
+        s.importFiles(urls: [a]); await waitForScrubbing(s)
+        s.handle(.toggleFlag(.red))
         s.requestMove(to: URL(fileURLWithPath: "/tmp/d"))
-        // pendingMoveCount 0 because no session, but dest set
         XCTAssertNotNil(s.pendingMoveDestination)
         s.importFiles(urls: [URL(fileURLWithPath: "/tmp/x.txt")]) // unsupported
         XCTAssertNil(s.pendingMoveDestination)

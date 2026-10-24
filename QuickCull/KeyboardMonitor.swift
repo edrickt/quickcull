@@ -9,32 +9,48 @@ final class KeyboardMonitor {
 
     func start(appState: AppState) {
         token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // Grid select-all: Cmd+A / Ctrl+A (accept both for muscle memory)
-            let isA = event.keyCode == 0 || event.charactersIgnoringModifiers?.lowercased() == "a"
-            let hasSelectAllModifier = event.modifierFlags.contains(.command) || event.modifierFlags.contains(.control)
-            if isA && hasSelectAllModifier {
+            switch Self.route(event) {
+            case .passthrough:
+                return event
+            case .selectAll:
                 Task { @MainActor in appState.selectAllInGrid() }
                 return nil
-            }
-            if let action = CullKeyMap.action(forKeyCode: event.keyCode) {
+            case .handle(let action):
                 Task { @MainActor in appState.handle(action) }
                 return nil   // consume
             }
-            return event
         }
 
-        // Loupe: hold Space (keyCode 49) to show 100% magnifier. Separate monitor
+        // Loupe: hold Space (keyCode 49) to show the magnifier. Separate monitor
         // for keyDown+keyUp so hold state is tracked without interfering with scrub
         // keys: non-Space events pass straight through. A Space hold that is still
         // down when the app deactivates is cleared by the viewer's
         // didResignActive/didResignKey observers (a keyUp may never arrive).
         loupeToken = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             guard event.keyCode == 49 else { return event }
+            guard !Self.systemOwnsKeys else { return event }
             if event.type == .keyDown, event.isARepeat { return nil }
             let isDown = event.type == .keyDown
             Task { @MainActor in appState.setLoupeActive(isDown) }
             return nil // consume Space while scrubbing
         }
+    }
+
+    /// A modal (the folder picker runs one) or a text field owns every key.
+    private static var systemOwnsKeys: Bool {
+        if NSApp.modalWindow != nil { return true }
+        return NSApp.keyWindow?.firstResponder is NSTextView
+    }
+
+    private static func route(_ event: NSEvent) -> KeyEventOutcome {
+        let flags = event.modifierFlags
+        return KeyRouter.outcome(
+            keyCode: event.keyCode,
+            hasCommand: flags.contains(.command),
+            hasControl: flags.contains(.control),
+            hasOption: flags.contains(.option),
+            hasModalWindow: NSApp.modalWindow != nil,
+            isEditingText: NSApp.keyWindow?.firstResponder is NSTextView)
     }
 
     func stop() {

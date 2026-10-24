@@ -29,17 +29,25 @@ public struct MoveCommit {
         let base = file.url.deletingPathExtension().lastPathComponent
         let ext = file.url.pathExtension
         var candidate = folder.appendingPathComponent(ext.isEmpty ? base : "\(base).\(ext)")
-        var n = 1
+        var suffix = 1
         while FileManager.default.fileExists(atPath: candidate.path) {
-            let name = ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)"
+            let name = ext.isEmpty ? "\(base) \(suffix)" : "\(base) \(suffix).\(ext)"
             candidate = folder.appendingPathComponent(name)
-            n += 1
+            suffix += 1
         }
         return candidate
     }
 
     public func commit(files: [SessionFile], to folder: URL) -> [MoveOutcome] {
-        files.map { file in
+        let destination = folder.standardizedFileURL
+        return files.map { file in
+            // A move into the folder the file already lives in is a no-op.
+            // Without this the collision suffix below finds the file itself at
+            // the destination and renames every original to "name 1.ext" in
+            // place — a mass rename the user never asked for.
+            if file.url.deletingLastPathComponent().standardizedFileURL.path == destination.path {
+                return MoveOutcome(file: file, error: nil)
+            }
             let base = file.url.deletingPathExtension().lastPathComponent
             let ext = file.url.pathExtension
             var dest = autoRenamedDestination(for: file, in: folder)
@@ -58,7 +66,9 @@ public struct MoveCommit {
                 do {
                     try mover.move(from: file.url, to: dest)
                     return MoveOutcome(file: file, error: nil)
-                } catch let e as NSError where e.domain == NSCocoaErrorDomain && e.code == NSFileWriteFileExistsError {
+                } catch let cocoaError as NSError
+                            where cocoaError.domain == NSCocoaErrorDomain
+                            && cocoaError.code == NSFileWriteFileExistsError {
                     // TOCTOU: destination was created between check and move — retry with next suffix.
                     let name = ext.isEmpty ? "\(base) \(nextSuffix)" : "\(base) \(nextSuffix).\(ext)"
                     dest = folder.appendingPathComponent(name)

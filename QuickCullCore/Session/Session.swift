@@ -55,6 +55,12 @@ public final class Session {
         idPositions = Dictionary(uniqueKeysWithValues: allFiles.enumerated().map { ($0.element.id, $0.offset) })
     }
 
+    /// The photo that was current when a filter emptied the projection. An
+    /// empty projection has no current index to remember, so leaving it (back
+    /// to All, or to a filter that matches again) resumes on this photo
+    /// instead of restarting at the first one.
+    private var stashedCurrentID: String?
+
     public var count: Int { files.count }
     public var isEmpty: Bool { files.isEmpty }
     /// Every photo in the session, filtered or not (for keeper counts).
@@ -64,7 +70,10 @@ public final class Session {
     /// Precondition: `files` is not empty (the scrubbing phase guarantees
     /// this; commit transitions away from an empty session).
     public var currentFile: SessionFile {
-        assert(!files.isEmpty, "currentFile requires a non-empty session")
+        // `precondition`, not `assert`: an empty projection is a supported
+        // state (the placeholder), but reading a photo out of it is not, and
+        // a release build must not hand out `files[0]` of an empty array.
+        precondition(!files.isEmpty, "currentFile requires a non-empty session")
         return files[currentIndex]
     }
 
@@ -103,15 +112,17 @@ public final class Session {
     /// (batch distinction).
     public func setFilter(_ filter: CullFilter) {
         let newFiles = projection(for: filter)
+        let currentID: String? = files.isEmpty ? stashedCurrentID : currentFile.id
         if newFiles.isEmpty {
+            stashedCurrentID = currentID
             self.filter = filter
             files = []
             currentIndex = 0
             return
         }
-        let currentID: String? = files.isEmpty ? nil : currentFile.id
         self.filter = filter
         files = newFiles
+        stashedCurrentID = nil
         if let cid = currentID, let idx = newFiles.firstIndex(where: { $0.id == cid }) {
             currentIndex = idx
         } else if let cid = currentID {
@@ -182,7 +193,7 @@ public final class Session {
         guard !validIDs.isEmpty else { return false }
         let beforeCount = files.count
         let beforeFilter = filter
-        let currentIDBefore = files.isEmpty ? nil : currentFile.id
+        let currentIDBefore = files.isEmpty ? stashedCurrentID : currentFile.id
         for id in validIDs {
             if flags[id] == color { flags.removeValue(forKey: id) } else { flags[id] = color }
         }
@@ -199,6 +210,7 @@ public final class Session {
             return true
         }
         files = newFiles
+        stashedCurrentID = nil
         if let cid = currentIDBefore, let idx = newFiles.firstIndex(where: { $0.id == cid }) {
             currentIndex = idx
         } else if let cid = currentIDBefore {
@@ -213,7 +225,7 @@ public final class Session {
     public func toggleFlags(ids: Set<String>) -> Bool { toggleFlags(ids: ids, color: .red) }
 
     public func contains(id: String) -> Bool {
-        allFiles.contains { $0.id == id }
+        idPositions[id] != nil
     }
 
     /// Remove trashed files after a successful commit. All flags are cleared
@@ -229,8 +241,11 @@ public final class Session {
     public func remove(_ filesToRemove: [SessionFile]) {
         guard !allFiles.isEmpty else { return }
         let ids = Set(filesToRemove.map(\.id))
+        // An empty projection that was already empty (the placeholder) is not
+        // a projection this removal emptied, so it must keep its filter.
+        let hadVisible = !files.isEmpty
         let currentPos: Int
-        if !files.isEmpty {
+        if hadVisible {
             currentPos = idPositions[currentFile.id] ?? 0
         } else {
             currentPos = 0
@@ -247,9 +262,10 @@ public final class Session {
         files = projection(for: filter)
         guard !files.isEmpty else {
             currentIndex = 0
-            if !allFiles.isEmpty {
+            if hadVisible, !allFiles.isEmpty {
                 filter = .all
                 files = allFiles
+                stashedCurrentID = nil
             }
             return
         }

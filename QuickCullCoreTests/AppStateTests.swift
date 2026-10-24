@@ -590,4 +590,91 @@ final class AppStateTests: XCTestCase {
         XCTAssertEqual(state.viewMode, .scrub) // AppState.startNewSession resets to scrub
         XCTAssertEqual(state.phase, .empty)
     }
+
+    func testFlagKeysAreIgnoredWhileTheTrashDialogIsUp() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let state = makeState()
+        state.importFiles(urls: [a, b])
+        await waitForScrubbing(state)
+        state.handle(.toggleFlag(.red))
+        state.requestCommit(color: .red)
+        XCTAssertEqual(state.pendingCommitCount, 1)
+        // The alert is up: scrub and flag keys must not change the session the
+        // dialog is describing.
+        state.handle(.next)
+        state.handle(.toggleFlag(.red))
+        XCTAssertEqual(state.session?.currentIndex, 0)
+        XCTAssertEqual(state.session?.flaggedCount, 1)
+    }
+
+    func testConfirmCommitsTheFilesTheDialogNamedEvenIfFlagsChange() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let trasher = StubTrasher()
+        let state = makeState(trasher: trasher)
+        state.importFiles(urls: [a, b])
+        await waitForScrubbing(state)
+        state.handle(.toggleFlag(.red))            // a is red
+        state.requestCommit(color: .red)
+        // Any mutation that bypasses the input gate must still not change the
+        // set the user approved.
+        state.session?.toggleFlag(color: .red)      // clears a's red flag
+        XCTAssertEqual(state.session?.flaggedCount, 0)
+        await state.confirmCommit()
+        XCTAssertEqual(trasher.trashed, [RawFileIdentity.fileID(for: a)])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: b.path))
+    }
+
+    func testGridFlagActionSkipsPhotosHiddenByTheFilter() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let state = makeState()
+        state.importFiles(urls: [a, b])
+        await waitForScrubbing(state)
+        let session = state.session!
+        let bFile = session.allFiles.first { $0.url.lastPathComponent == "b.cr2" }!
+        state.handle(.toggleFlag(.red))             // a red, current stays a
+        state.setViewMode(.grid)
+        state.selectAllInGrid()                     // both ids selected
+        state.setFilter(.red)                       // only a is visible now
+        XCTAssertEqual(state.session?.count, 1)
+        XCTAssertEqual(state.gridSelection.count, 2)
+        state.handle(.toggleFlag(.red))             // Z: unflag the visible one
+        XCTAssertNil(state.session?.flagColor(for: bFile))
+        XCTAssertEqual(state.session?.flaggedCount, 0)
+    }
+
+    func testUnsupportedOnlyImportClearsThePreviousSession() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let txt = try TestFixtures.makeRawFile(named: "n.txt", in: tempDir)
+        let state = makeState()
+        state.importFiles(urls: [a])
+        await waitForScrubbing(state)
+        XCTAssertNotNil(state.session)
+        state.importFiles(urls: [txt])
+        XCTAssertNil(state.session)
+        XCTAssertNil(state.thumbWindow)
+        XCTAssertNil(state.displayImages)
+        XCTAssertEqual(state.phase, .empty)
+        XCTAssertEqual(state.importFailures.count, 1)
+    }
+
+    func testSuccessfulCommitDeletesTheCachedPreview() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let state = makeState()
+        state.importFiles(urls: [a])
+        await waitForScrubbing(state)
+        let file = state.session!.allFiles[0]
+        let preview = try cache.cacheURL(for: file)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: preview.path))
+        state.handle(.toggleFlag(.red))
+        state.requestCommit(color: .red)
+        await state.confirmCommit()
+        let deadline = Date().addingTimeInterval(5)
+        while FileManager.default.fileExists(atPath: preview.path), Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: preview.path))
+    }
 }

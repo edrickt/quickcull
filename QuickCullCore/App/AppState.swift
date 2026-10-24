@@ -32,11 +32,17 @@ public final class AppState {
     public private(set) var commitFailureRevision: Int = 0
     public private(set) var pendingCommitCount: Int = 0
     public private(set) var pendingCommitColor: FlagColor?
+    /// The exact files the pending dialog names. Snapshotted at request time so
+    /// a flag key that lands while the alert is up cannot change what gets
+    /// trashed, and so the count the user approved is the count that commits.
+    private var pendingCommitFiles: [SessionFile] = []
     public private(set) var lastCommitColor: FlagColor?
     public private(set) var isCommitting: Bool = false
     public private(set) var pendingMoveCount: Int = 0
     public private(set) var pendingMoveDestination: URL?
     public private(set) var pendingMoveColor: FlagColor?
+    /// See `pendingCommitFiles`.
+    private var pendingMoveFiles: [SessionFile] = []
     public private(set) var lastMoveColor: FlagColor?
     /// `internal(set)` so tests can inject failures; app code treats as read-only.
     public internal(set) var moveFailures: [MoveOutcome] = []
@@ -102,14 +108,20 @@ public final class AppState {
     private func resetTransientState() {
         pendingCommitCount = 0
         pendingCommitColor = nil
+        pendingCommitFiles = []
         lastCommitColor = nil
         isCommitting = false
         commitFailures = []
+        // The revisions are the failure channel; clearing the arrays is a
+        // notification too, so an observer keyed on the revision must see it.
+        commitFailureRevision += 1
         pendingMoveCount = 0
         pendingMoveDestination = nil
         pendingMoveColor = nil
+        pendingMoveFiles = []
         lastMoveColor = nil
         moveFailures = []
+        moveFailureRevision += 1
         isMoving = false
     }
 
@@ -159,13 +171,17 @@ public final class AppState {
         let supported = unique.filter(RawFileIdentity.isSupported)
         guard !supported.isEmpty else {
             // Nothing importable: surface the unsupported selection in the
-            // empty-state banner instead of silently ignoring it.
+            // empty-state banner instead of silently ignoring it. A previous
+            // session must not survive behind the importer, so this goes
+            // through the same empty transition every other path uses.
             importFailures = unique.map {
                 DecodeOutcome(file: SessionFile(url: $0),
                               error: .cannotOpen("Unsupported format"))
             }
             resetTransientState()
-            phase = .empty
+            gridSelection = []
+            gridAnchorID = nil
+            transitionToEmptySession()
             return
         }
 
@@ -255,7 +271,8 @@ public final class AppState {
     }
 
     public func handle(_ action: CullAction) {
-        guard let session, phase == .scrubbing, !isMoving, !isCommitting else { return }
+        guard let session, phase == .scrubbing, !isMoving, !isCommitting,
+              pendingCommitCount == 0, pendingMoveCount == 0 else { return }
         switch action {
         case .next: session.move(by: 1)
         case .previous: session.move(by: -1)
@@ -263,7 +280,12 @@ public final class AppState {
         case .jumpBack: session.move(by: -10)
         case .toggleFlag(let color):
             if viewMode == .grid && !gridSelection.isEmpty {
-                let changed = session.toggleFlags(ids: gridSelection, color: color)
+                // A selection outlives a filter switch on purpose (returning to
+                // All restores it), so flag only the ids on screen right now —
+                // a batch action must never reach a photo the user cannot see.
+                let visible = gridSelection.intersection(Set(session.files.map(\.id)))
+                guard !visible.isEmpty else { return }
+                let changed = session.toggleFlags(ids: visible, color: color)
                 if changed { installWindows(for: session.files) } else { syncWindows() }
                 // Deselect after any flag action: Ctrl+A + Z should not stay highlighted
                 gridSelection = []
@@ -310,11 +332,13 @@ public final class AppState {
     }
 
     public func selectSingle(id: String) {
+        guard !isCommitting, !isMoving else { return }
         gridSelection = [id]
         gridAnchorID = id
     }
 
     public func toggleSelection(id: String) {
+        guard !isCommitting, !isMoving else { return }
         if gridSelection.contains(id) { gridSelection.remove(id) }
         else { gridSelection.insert(id) }
         // Intentionally does not update gridAnchorID: Finder-like semantics where
@@ -323,6 +347,7 @@ public final class AppState {
     }
 
     public func selectRange(to targetID: String) {
+        guard !isCommitting, !isMoving else { return }
         guard let anchor = gridAnchorID,
               let session,
               let anchorIdx = session.files.firstIndex(where: { $0.id == anchor }),
@@ -335,6 +360,7 @@ public final class AppState {
     }
 
     public func handleGridTap(id: String, isCmd: Bool, isShift: Bool) {
+        guard !isCommitting, !isMoving else { return }
         if isShift { selectRange(to: id) }
         else if isCmd { toggleSelection(id: id) }
         else { selectSingle(id: id) }
@@ -354,7 +380,8 @@ public final class AppState {
     }
 
     public func selectAllInGrid() {
-        guard phase == .scrubbing, viewMode == .grid, let session else { return }
+        guard phase == .scrubbing, viewMode == .grid, !isCommitting, !isMoving,
+              let session else { return }
         guard !session.files.isEmpty else { return }
         gridSelection = Set(session.files.map(\.id))
         gridAnchorID = session.files.first?.id
@@ -371,18 +398,25 @@ public final class AppState {
     }
 
     public func requestCommit(color: FlagColor? = nil) {
-        guard !isMoving, !isCommitting else { return }
+        guard phase == .scrubbing, !isMoving, !isCommitting else { return }
+        pendingCommitFiles = session?.flaggedFiles(color) ?? []
         pendingCommitColor = color
-        pendingCommitCount = session?.flaggedCount(color) ?? 0
+        pendingCommitCount = pendingCommitFiles.count
     }
 
     public func confirmCommit() async {
-        guard let session, !isCommitting, !isMoving else { return }
+        guard let session, phase == .scrubbing, !isCommitting, !isMoving else { return }
         let generation = sessionGeneration
         let color = pendingCommitColor
-        let flagged = session.flaggedFiles(color)
-        guard !flagged.isEmpty else { pendingCommitCount = 0; pendingCommitColor = nil; return }
+        let flagged = pendingCommitFiles
+        guard !flagged.isEmpty else {
+            pendingCommitCount = 0
+            pendingCommitColor = nil
+            pendingCommitFiles = []
+            return
+        }
         isCommitting = true
+        let previews = resolvedPreviewURLs(for: flagged)
         let outcomes = await Task.detached(priority: .userInitiated) {
             TrashCommit(trasher: self.trasher).commit(files: flagged)
         }.value
@@ -398,23 +432,27 @@ public final class AppState {
         lastCommitColor = commitFailures.isEmpty ? nil : color
         pendingCommitCount = 0
         pendingCommitColor = nil
+        pendingCommitFiles = []
         isCommitting = false
         if session.isEmpty {
             transitionToEmptySession()
         } else {
             installWindows(for: session.files)
         }
+        discardCachedPreviews(at: succeeded.compactMap { previews[$0.id] })
     }
 
     public func cancelCommit() {
         guard !isMoving, !isCommitting else { return }
         pendingCommitCount = 0
         pendingCommitColor = nil
+        pendingCommitFiles = []
     }
 
     public func requestMove(to dest: URL, color: FlagColor? = nil) {
-        guard !isMoving, !isCommitting else { return }
-        pendingMoveCount = session?.flaggedCount(color) ?? 0
+        guard phase == .scrubbing, !isMoving, !isCommitting else { return }
+        pendingMoveFiles = session?.flaggedFiles(color) ?? []
+        pendingMoveCount = pendingMoveFiles.count
         pendingMoveDestination = dest
         pendingMoveColor = color
     }
@@ -423,14 +461,23 @@ public final class AppState {
         pendingMoveCount = 0
         pendingMoveDestination = nil
         pendingMoveColor = nil
+        pendingMoveFiles = []
     }
     public func confirmMove() async {
-        guard let session, !isCommitting, !isMoving, let dest = pendingMoveDestination else { return }
+        guard let session, phase == .scrubbing, !isCommitting, !isMoving,
+              let dest = pendingMoveDestination else { return }
         let generation = sessionGeneration
         let color = pendingMoveColor
-        let flagged = session.flaggedFiles(color)
-        guard !flagged.isEmpty else { pendingMoveCount = 0; pendingMoveDestination = nil; pendingMoveColor = nil; return }
+        let flagged = pendingMoveFiles
+        guard !flagged.isEmpty else {
+            pendingMoveCount = 0
+            pendingMoveDestination = nil
+            pendingMoveColor = nil
+            pendingMoveFiles = []
+            return
+        }
         isMoving = true
+        let previews = resolvedPreviewURLs(for: flagged)
         let outcomes = await Task.detached(priority: .userInitiated) {
             MoveCommit(mover: self.mover).commit(files: flagged, to: dest)
         }.value
@@ -446,11 +493,35 @@ public final class AppState {
         pendingMoveCount = 0
         pendingMoveDestination = nil
         pendingMoveColor = nil
+        pendingMoveFiles = []
         isMoving = false
         if session.isEmpty {
             transitionToEmptySession()
         } else {
             installWindows(for: session.files)
+        }
+        discardCachedPreviews(at: succeeded.compactMap { previews[$0.id] })
+    }
+
+    /// Cache locations of the files about to be trashed or moved, resolved
+    /// while the source files still exist: the key embeds their size and mtime,
+    /// so once they are gone it cannot be recomputed.
+    private func resolvedPreviewURLs(for files: [SessionFile]) -> [String: URL] {
+        var urls: [String: URL] = [:]
+        urls.reserveCapacity(files.count)
+        for file in files {
+            if let url = try? cache.cacheURL(for: file) { urls[file.id] = url }
+        }
+        return urls
+    }
+
+    /// A trashed or moved file can never be viewed again, so its decoded
+    /// previews must not keep occupying the cache.
+    private func discardCachedPreviews(at urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let cache = self.cache
+        Task.detached(priority: .utility) {
+            for url in urls { await cache.deleteCachedPreviews(at: url) }
         }
     }
 }

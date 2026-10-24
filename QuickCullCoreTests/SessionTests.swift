@@ -321,4 +321,32 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(session.currentIndex, 1)
     }
 
+    func testEmptyFilterPlaceholderKeepsTheCurrentPhotoForTheReturn() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.setIndex(2)                       // on c
+        session.setFilter(.red)                   // nothing flagged: placeholder
+        XCTAssertTrue(session.isEmpty)
+        session.setFilter(.all)
+        // Leaving the placeholder resumes on c, not on the first photo.
+        XCTAssertEqual(session.currentFile.url.lastPathComponent, "c.cr2")
+    }
+
+    func testRemoveKeepsPlaceholderFilterWhenTheProjectionWasAlreadyEmpty() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.setFilter(.red)                   // placeholder, matches nothing
+        session.remove([session.allFiles[2]])     // e.g. a commit for an invisible file
+        XCTAssertEqual(session.filter, .red)
+        XCTAssertEqual(session.count, 0)
+    }
+
+    func testRemoveFromNonEmptyProjectionStillFallsBackToAll() {
+        let session = Session(files: TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2"]))
+        session.toggleFlag()                      // a red
+        session.setFilter(.red)
+        XCTAssertEqual(session.count, 1)
+        session.remove(session.files)             // commit empties the filter
+        XCTAssertEqual(session.filter, .all)
+        XCTAssertEqual(session.count, 2)
+    }
+
 }

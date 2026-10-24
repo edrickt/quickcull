@@ -64,4 +64,17 @@ final class MoveCommitTests: XCTestCase {
         let outcomes = MoveCommit(mover: FileManagerMover()).commit(files: [file], to: dst)
         XCTAssertFalse(outcomes[0].succeeded)
     }
+
+    func testMoveIntoTheSourceFolderIsANoOp() throws {
+        let dir = try TestFixtures.makeTempDir(name: "move-self")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let source = dir.appendingPathComponent("a.jpg")
+        try Data("src".utf8).write(to: source)
+        let file = SessionFile(url: source)
+        let outcomes = MoveCommit(mover: FileManagerMover()).commit(files: [file], to: dir)
+        XCTAssertTrue(outcomes[0].succeeded)
+        // Nothing renamed in place, and no "a 1.jpg" copy appeared.
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["a.jpg"])
+        XCTAssertEqual(try Data(contentsOf: source), Data("src".utf8))
+    }
 }

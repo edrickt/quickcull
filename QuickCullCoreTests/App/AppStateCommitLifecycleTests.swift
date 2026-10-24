@@ -129,17 +129,19 @@ final class AppStateCommitLifecycleTests: XCTestCase {
         await waitForScrubbing(state)
         state.handle(.toggleFlag(.red))   // flag a
 
+        let beforeFirst = state.commitFailureRevision
         state.requestCommit()
         await state.confirmCommit()
         XCTAssertEqual(state.commitFailures.count, 1)
-        XCTAssertEqual(state.commitFailureRevision, 1)
+        XCTAssertEqual(state.commitFailureRevision, beforeFirst + 1)
         XCTAssertEqual(state.session?.flaggedCount, 1, "a failed file keeps its flag")
 
         // Same single failure again: count unchanged, revision must advance.
+        let beforeSecond = state.commitFailureRevision
         state.requestCommit()
         await state.confirmCommit()
         XCTAssertEqual(state.commitFailures.count, 1)
-        XCTAssertEqual(state.commitFailureRevision, 2,
+        XCTAssertEqual(state.commitFailureRevision, beforeSecond + 1,
                        "count-based observation would miss this second failure")
         XCTAssertEqual(state.session?.flaggedCount, 1)
     }
@@ -154,14 +156,18 @@ final class AppStateCommitLifecycleTests: XCTestCase {
         await waitForScrubbing(state)
         state.handle(.toggleFlag(.red))
 
+        let beforeCommit = state.commitFailureRevision
         state.requestCommit()
         await state.confirmCommit()
         XCTAssertTrue(state.commitFailures.isEmpty)
-        XCTAssertEqual(state.commitFailureRevision, 1)
+        XCTAssertEqual(state.commitFailureRevision, beforeCommit + 1)
         XCTAssertEqual(state.session?.count, 1)
 
+        // Clearing the failure channel is itself a notification.
+        let beforeNewSession = state.commitFailureRevision
         state.startNewSession()
         XCTAssertTrue(state.commitFailures.isEmpty)
         XCTAssertNil(state.session)
+        XCTAssertEqual(state.commitFailureRevision, beforeNewSession + 1)
     }
 }

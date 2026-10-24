@@ -18,6 +18,9 @@ extension FocusedValues {
 @main
 struct QuickCullApp: App {
     @State private var appState = AppState()
+    /// One monitor and one quit observer for the whole app, not per window:
+    /// closing a window must not disarm the keys or the quit-time cache wipe
+    /// for the windows still open. Installed once by the first window's task.
     @State private var monitor: KeyboardMonitor?
     @State private var terminateObserver: NSObjectProtocol?
 
@@ -46,16 +49,6 @@ struct QuickCullApp: App {
                         forName: NSApplication.willTerminateNotification,
                         object: nil, queue: .main) { _ in
                         Task { try? await cache.wipe() }
-                    }
-                }
-                .onDisappear {
-                    // Per-window monitor: stop it when the window closes so
-                    // duplicate monitors don't double-fire after reopening.
-                    monitor?.stop()
-                    monitor = nil
-                    if let terminateObserver {
-                        NotificationCenter.default.removeObserver(terminateObserver)
-                        self.terminateObserver = nil
                     }
                 }
         }
