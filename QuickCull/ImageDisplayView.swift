@@ -48,7 +48,9 @@ struct ImageDisplayView: View {
                                 Color.black
                                 if let img = leftCG, let file = currentFile {
                                     let flagColor = appState.session?.flagColor(for: file)
-                                    ZoomableImageView(cgImage: img, fileID: file.id, flagColor: flagColor, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
+                                    ZoomableImageView(cgImage: img, fileID: file.id, flagColor: flagColor,
+                                                      hasSourcePixels: appState.displayImages?.isFullResolution(at: index) ?? false,
+                                                      scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
                                 } else { Color.black }
                             }.frame(width: geo.size.width, height: geo.size.height)
                         }.clipped()
@@ -56,7 +58,10 @@ struct ImageDisplayView: View {
                             ZStack {
                                 Color.black
                                 if let img = rightCG, rightFile != nil {
-                                    ZoomableImageView(cgImage: img, fileID: rightFile?.id, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
+                                    ZoomableImageView(cgImage: img, fileID: rightFile?.id,
+                                                      flagColor: rightFile.flatMap { appState.session?.flagColor(for: $0) },
+                                                      hasSourcePixels: appState.displayImages?.isFullResolution(at: rightIndex) ?? false,
+                                                      scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
                                 } else if rightFile == nil {
                                     VStack(spacing: 8) { Image(systemName:"photo.slash").font(.title2).foregroundStyle(.secondary)
                                                          Text("No next image").font(.caption).foregroundStyle(.secondary) }
@@ -104,7 +109,9 @@ struct ImageDisplayView: View {
                     GeometryReader { geo in
                         ZStack {
                             Color.black
-                            ZoomableImageView(cgImage: cgImage, fileID: currentFile?.id, flagColor: flagColor, scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
+                            ZoomableImageView(cgImage: cgImage, fileID: currentFile?.id, flagColor: flagColor,
+                                              hasSourcePixels: appState.displayImages?.isFullResolution(at: index) ?? false,
+                                              scale: $zoomScale, lastScale: $zoomLastScale, offset: $zoomOffset, lastOffset: $zoomLastOffset)
                         }.frame(width: geo.size.width, height: geo.size.height)
                     }.clipped()
                 }

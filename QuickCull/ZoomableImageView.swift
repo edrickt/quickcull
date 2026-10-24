@@ -12,6 +12,9 @@ struct ZoomableImageView: View {
     let cgImage: CGImage
     let fileID: String?
     var flagColor: FlagColor? = nil
+    /// Whether `cgImage` carries source pixels (`ImageWindow.isFullResolution`).
+    /// The loupe labels itself honestly when it does not.
+    var hasSourcePixels: Bool = true
 
     @Binding var scale: CGFloat
     @Binding var lastScale: CGFloat
@@ -42,14 +45,14 @@ struct ZoomableImageView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(width: fitted.width, height: fitted.height)
                     .scaleEffect(scale)
-                    .offset(offset)
+                    .offset(renderOffset)
                 if let c = flagColor {
                     Color.clear
                         .frame(width: fitted.width * scale, height: fitted.height * scale)
                         .overlay(alignment: .topTrailing) {
                             FlagBadge(color: c, size: 44)
                         }
-                        .offset(offset)
+                        .offset(renderOffset)
                         .allowsHitTesting(false)
                 }
 
@@ -66,7 +69,8 @@ struct ZoomableImageView: View {
                         diameter: loupeDiameter,
                         offset: loupeOffset,
                         scale: scale,
-                        panOffset: offset
+                        panOffset: renderOffset,
+                        hasSourcePixels: hasSourcePixels
                     )
                     .allowsHitTesting(false)
                     .transition(.opacity.animation(.easeOut(duration: 0.12)))
@@ -365,6 +369,14 @@ struct ZoomableImageView: View {
             height: min(max(off.height, -maxY), maxY)
         )
     }
+
+    /// Split binds one pan offset into both panes, but each pane has its own
+    /// aspect ratio and therefore its own limits. Clamp against this pane's own
+    /// geometry at render time, so a portrait neighbour cannot be dragged half
+    /// out of its viewport by a pan the landscape pane needed.
+    private var renderOffset: CGSize {
+        clampedOffset(offset, container: liveContainer, fitted: liveFitted, scale: scale)
+    }
 }
 
 /// 100% magnifier lens that follows the cursor while Space is held.
@@ -373,6 +385,7 @@ struct ZoomableImageView: View {
 /// decode (ImageWindow.display has no downsample cap), so this is genuine
 /// source-pixel 1:1 — the "100%" badge is exact at any image size.
 private struct LoupeView: View {
+    @Environment(\.displayScale) private var displayScale
     let cgImage: CGImage
     let hoverLocation: CGPoint
     let container: CGSize
@@ -381,10 +394,17 @@ private struct LoupeView: View {
     let offset: CGPoint
     let scale: CGFloat
     let panOffset: CGSize
+    /// False while the pane holds a half-size placeholder or a 320px filmstrip
+    /// thumbnail: the lens then magnifies whatever it has, and must not claim
+    /// source-pixel 1:1 while doing it.
+    let hasSourcePixels: Bool
 
     var body: some View {
         GeometryReader { _ in
-            let backing = NSScreen.main?.backingScaleFactor ?? 2.0
+            // The pane's own backing scale, not the main screen's: on a
+            // secondary display of a different scale the lens was sampling the
+            // wrong number of source pixels and was not 1:1.
+            let backing = displayScale
             let cropSize = diameter * backing
             let cropped: CGImage? = croppedImage(cropSize: cropSize)
 
@@ -415,9 +435,9 @@ private struct LoupeView: View {
                     .shadow(color: .black.opacity(0.3), radius: 2)
             )
             .position(x: lensCenter.x, y: lensCenter.y)
-            // info badge: 100% label
+            // info badge: the real ratio, not a claim
             .overlay(alignment: .bottom) {
-                Text("100%")
+                Text(hasSourcePixels ? "100%" : "preview")
                     .font(.caption2.monospaced())
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(.black.opacity(0.65), in: Capsule())

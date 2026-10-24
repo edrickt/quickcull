@@ -46,13 +46,16 @@ struct MetadataHUDView: View {
         // metadata block) over the newer task's output. Guard each state
         // write so only the latest task wins.
         .task(id: "\(file.id)-\(cgImage?.width ?? 0)x\(cgImage?.height ?? 0)") {
+            // Clear the previous photo's rows too: a stale camera/ISO/shutter
+            // block under the new file's thumbnail reads as that file's EXIF.
+            metadata = nil
             histogram = nil
             stats = nil
             async let meta = Task.detached(priority: .utility) {
                 // True dimensions come from the decoded cache JPEG (full-res,
                 // orientation baked in) — never from the displayed CGImage,
                 // which may be a 320px thumbnail or a screen-limited downsample.
-                let cacheURL = try? await cache.cacheURL(for: file)
+                let cacheURL = try? cache.cacheURL(for: file)
                 return ImageMetadataProvider.metadata(for: file, cgImage: cgImage, cacheJPEGURL: cacheURL)
             }.value
             async let hist = Task.detached(priority: .utility) {
