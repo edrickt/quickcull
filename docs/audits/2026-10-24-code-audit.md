@@ -17,8 +17,8 @@
 | --- | --- | --- |
 | `QuickCullCore` Debug build | success | success |
 | `QuickCull` Release build | success | success |
-| Test suite | 207 tests, 0 failures, 82.9 s | 226 tests, 0 failures, 83.2 s |
-| README claim | 205 tests | 226 tests |
+| Test suite | 207 tests, 0 failures, 82.9 s | 227 tests, 0 failures, 83.4 s |
+| README claim | 205 tests | 227 tests |
 
 Commands:
 
@@ -67,6 +67,7 @@ maintainability. Every fixed row is covered by a test in `QuickCullCoreTests/`.
 | AUD-28 | P3 | `testExifFieldsParsedIfPresent` asserted nothing (`iso == "ISO 400" || iso == nil`). | `QuickCullCoreTests/ImageMetadataProviderTests.swift` | Fixed: asserts the parsed ISO and aperture exactly |
 | AUD-29 | P3 | Grid selection and the four selection entry points ignored the in-flight commit guard that every other input path has. | `App/AppState.swift` | Fixed: all of them are gated |
 | AUD-30 | P3 | Documentation drift: README claimed 205 tests (207 actual), the filmstrip's 61 bound (101 actual), and unbounded grid retention as a feature. | `README.md` | Fixed |
+| AUD-31 | P2 | The cache wipe on New Session is fire-and-forget while a decode can be past its cancellation check, so a dead session's preview could be written into the freshly wiped cache directory. | `Storage/ImageCacheStore.swift:wipe/storeJPEG` | Fixed: every `wipe()` bumps a generation, and a store call that began before it throws `CacheError.staleGeneration` instead of writing. `testWriteStartedBeforeAWipeDoesNotLandInTheFreshCache` |
 
 ## 3. Accepted and deferred
 
@@ -80,6 +81,9 @@ maintainability. Every fixed row is covered by a test in `QuickCullCoreTests/`.
 | Grid body rebuilds an O(n) element array per landed thumbnail | Bounded cost today (the grid keeps 61 thumbs), and a cache keyed on `(flagRevision, images.count)` would add state to the view. |
 | `fileID` does not resolve symlinks, so a symlinked alias can enter a session twice | Exotic, and resolving symlinks changes the cache key (and therefore invalidates every existing preview) for a case no user has reported. |
 | `AppState` body is 378 lines (SwiftLint's 350 threshold) | Splitting it is a refactor with its own risk profile; the class is cohesive and fully covered. |
+| Decode worker count is derived from `physicalMemory` once at init, not from available memory | There is a low-memory shed (one worker when free memory dips under 1 GiB), and no measurement justifies a per-import recomputation. Re-deriving on every import would be a guess dressed as a fix. |
+| `ImageWindow.ensureLoaded` scans the ensured set per appearing cell | The scan is bounded now: 61 entries maximum, so a grid body pass costs at most 61 comparisons per cell. It was only quadratic while the grid was unbounded. |
+| The loupe crops its `CGImage` inside the view body on every hover move | `CGImage.cropping` creates a view over the existing bitmap rather than copying pixels, so this is cheap until measured otherwise. Restructuring it on suspicion would add state to a view that has none. |
 
 ## 4. Tooling note (read this before trusting a diagnostics panel)
 
@@ -93,16 +97,20 @@ cleanly and 226 tests pass.
 
 `.pi-lens.json` disables the Swift LSP for this project for that reason, and
 `AGENTS.md` records the rule: `xcodebuild` is the only authoritative type check
-here.
+here. `Scripts/gen-compile-db.sh` emits a `compile_commands.json` (whole-module
+type definitions plus the LibRaw include path) for the case where the editor's
+language server is expected to be accurate; run it after
+`Scripts/build-libraw.sh`, and restart the language server so it reads the file.
 
 ## 5. What was verified, and how
 
 - **Type checking and builds:** `QuickCullCore` Debug and `QuickCull` Release,
   both green after every accepted fix.
-- **Behavior:** 226 unit tests, up from 207, each fixed finding carrying a test
+- **Behavior:** 227 unit tests, up from 207, each fixed finding carrying a test
   that fails on the pre-fix code (grid residency with 100 ensured cells and a
   61 cap, in-flight reduced load upgrading, snapshot commit, placeholder
-  round-trip, same-folder move, key routing, cache cleanup).
+  round-trip, same-folder move, key routing, cache cleanup, stale-generation
+  cache write).
 - **Real app surface:** Release build launched, empty state rendered, the file
   picker was driven through a modal with typed input, and the letters reached
   the panel instead of the cull key map — the AUD-03 regression, observed on the

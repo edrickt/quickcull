@@ -397,6 +397,14 @@ public final class AppState {
         // the display window (behind/ahead policy) suffices for the panes.
     }
 
+}
+
+
+/// Destructive-action flow: request a target set, confirm it, apply the
+/// outcomes. Their own extension because they are one state machine
+/// (`pending*` -> `isCommitting`/`isMoving` -> `installWindows` or the empty
+/// transition) and never touch the import/scrub paths.
+extension AppState {
     public func requestCommit(color: FlagColor? = nil) {
         guard phase == .scrubbing, !isMoving, !isCommitting else { return }
         pendingCommitFiles = session?.flaggedFiles(color) ?? []

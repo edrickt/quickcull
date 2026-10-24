@@ -163,4 +163,22 @@ final class ImageCacheStoreTests: XCTestCase {
         let destClamped = try await store.storeJPEG(bmp, for: file, quality: 2.0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: destClamped.path))
     }
+
+    /// New Session cancels the import and wipes fire-and-forget, so a decode
+    /// already past its cancellation check can still be holding a bitmap. Its
+    /// write must not land in the fresh cache.
+    func testWriteStartedBeforeAWipeDoesNotLandInTheFreshCache() async throws {
+        let file = SessionFile(url: URL(fileURLWithPath: "/tmp/shoot/stale.cr2"))
+        let bitmap = RawBitmap(image: TestFixtures.makeCGImage(width: 8, height: 8, color: 3),
+                               width: 8, height: 8, flip: 0)
+        let generation = await store.currentStoreGeneration()
+        try await store.wipe()
+        do {
+            _ = try await store.storeJPEG(bitmap, for: file, quality: 0.75, assuming: generation)
+            XCTFail("a write started before the wipe must not land")
+        } catch CacheError.staleGeneration {
+            // expected
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: (try store.cacheURL(for: file)).path))
+    }
 }

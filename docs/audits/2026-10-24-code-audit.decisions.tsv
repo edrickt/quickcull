@@ -21,3 +21,5 @@ step	unit	decision_or_hypothesis	evidence	result
 20	AUD-26+27+28	sRGB tag, clean fixture install, a test that actually asserts	ImageMetadataProviderTests.testExifFieldsParsedIfPresent now strict	fixed
 21	tooling	The single-file Swift analyzer cannot type-check this project	107 workspace "errors" vs xcodebuild green and 226 passing tests; .pi-lens.json + AGENTS.md	recorded
 22	final	Predicate: builds green, suite green above baseline, audit recorded, branch pushed	xcodebuild Debug+Release green; 226 tests, 0 failures	verified
+23	AUD-31	A store started before a wipe must not land; wipe bumps a generation	ImageCacheStoreTests.testWriteStartedBeforeAWipeDoesNotLandInTheFreshCache	fixed
+24	follow-up	Four findings from the audit passes were missing from the report; two are now recorded as deferred, one fixed, one accepted	deferred table rows: worker count, ensureLoaded scan, loupe crop; AUD-31 fixed	recorded

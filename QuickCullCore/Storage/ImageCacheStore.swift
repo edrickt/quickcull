@@ -29,8 +29,20 @@ public actor ImageCacheStore {
         baseDirEnsured = true
     }
 
+    /// Bumped by every `wipe()`. A store call that began before a wipe must not
+    /// write into the fresh cache: `startNewSession` cancels the import and then
+    /// wipes fire-and-forget, so a decode already past its cancellation check
+    /// can still hold a bitmap. Without this guard that dead session's preview
+    /// reappears in the new cache directory.
+    private var storeGeneration = 0
+
+    func currentStoreGeneration() -> Int { storeGeneration }
+
+    private func isCurrentGeneration(_ generation: Int) -> Bool { storeGeneration == generation }
+
     /// Authoritative launch-time cleanup: delete everything, recreate.
     public func wipe() throws {
+        storeGeneration += 1
         let fm = FileManager.default
         if fm.fileExists(atPath: baseURL.path) {
             try fm.removeItem(at: baseURL)
@@ -71,6 +83,17 @@ public actor ImageCacheStore {
     @discardableResult
     public nonisolated func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile,
                                       quality: CGFloat) async throws -> URL {
+        // Snapshot before the encode: the write must not land if a wipe lands
+        // while this is working.
+        let generation = await currentStoreGeneration()
+        return try await storeJPEG(bitmap, for: file, quality: quality, assuming: generation)
+    }
+
+    /// `assuming` is the cache generation the caller saw when it started.
+    /// Internal so a test can drive a pre-wipe snapshot deterministically.
+    @discardableResult
+    nonisolated func storeJPEG(_ bitmap: RawBitmap, for file: SessionFile, quality: CGFloat,
+                               assuming generation: Int) async throws -> URL {
         try await ensureBaseDirExists()
         let destination = try cacheURL(for: file)
         let tmp = destination.appendingPathExtension("tmp")
@@ -85,6 +108,9 @@ public actor ImageCacheStore {
         CGImageDestinationAddImage(sink, bitmap.image, props as CFDictionary)
         guard CGImageDestinationFinalize(sink) else {
             throw CacheError.cannotEncode
+        }
+        guard await isCurrentGeneration(generation) else {
+            throw CacheError.staleGeneration
         }
         if FileManager.default.fileExists(atPath: destination.path) {
             _ = try FileManager.default.replaceItemAt(destination, withItemAt: tmp)
@@ -164,4 +190,6 @@ public actor ImageCacheStore {
 public enum CacheError: Error {
     case cannotCreateDestination
     case cannotEncode
+    /// The cache was wiped while this write was in flight.
+    case staleGeneration
 }

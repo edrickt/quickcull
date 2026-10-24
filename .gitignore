@@ -5,3 +5,4 @@ xcuserdata/
 *.xcuserstate
 
 .superpowers/
+compile_commands.json
