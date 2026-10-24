@@ -261,6 +261,77 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertEqual(window.image(at: ringAhead)?.width, 64, "landing upgrades the ring to full-res")
     }
 
+    /// Landing on an index while its reduced load is still in flight must still
+    /// upgrade it: the `setCurrent` upgrade pass skips in-flight indices, so the
+    /// completion is the only place that can notice the tier moved.
+    func testLandingOnAnInFlightReducedLoadUpgradesIt() async {
+        let gate = AsyncGate()
+        let full = TestFixtures.makeCGImage(width: 64, height: 64, color: 1)
+        let reduced = TestFixtures.makeCGImage(width: 32, height: 32, color: 2)
+        let window = ImageWindow(behind: 3, ahead: 3, count: 10,
+                                 loader: { _ in full },
+                                 reducedLoader: { _ in
+                                     await gate.wait()   // hold the reduced decode open
+                                     return reduced
+                                 },
+                                 upgradePolicy: { index, current in abs(index - current) > 1 })
+        window.setCurrent(5)   // 4,5,6 full; 2,3,7,8 kick off reduced loads
+        window.setCurrent(2)   // land on 2 while its reduced load is in flight
+        await gate.open()
+        await window.waitUntilSettled()
+        XCTAssertEqual(window.image(at: 2)?.width, 64,
+                       "the in-flight reduced load must be followed by a full-res upgrade")
+    }
+
+    /// The grid keeps the viewport the user reached, never the whole shoot:
+    /// residency is bounded by the fixed cap, not by the file count.
+    func testGridResidencyIsBoundedByTheFixedCap() async throws {
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        var files: [SessionFile] = []
+        for i in 0..<100 {
+            let file = SessionFile(url: fixtureDir.appendingPathComponent(String(format: "%03d.jpg", i)))
+            files.append(file)
+            let destination = try cache.cacheURL(for: file)
+            try TestFixtures.writeJPEG(color: UInt8(i % 256), to: destination)
+        }
+        let window = ImageWindow.gridThumbnails(files: files, cache: cache)
+        window.ensureLoaded(indices: Array(0..<100))
+        await window.waitUntilSettled()
+        XCTAssertLessThanOrEqual(window.images.count, ImageWindow.residentThumbCap)
+        XCTAssertNotNil(window.image(at: 99), "the most recently ensured cell stays resident")
+    }
+
+    /// The loupe labels itself from this: a reduced placeholder must not
+    /// report source pixels, and landing on the index must flip it.
+    func testFullResolutionReflectsTheResidentTier() async {
+        let full = TestFixtures.makeCGImage(width: 64, height: 64, color: 1)
+        let reduced = TestFixtures.makeCGImage(width: 32, height: 32, color: 2)
+        let window = ImageWindow(behind: 3, ahead: 3, count: 10,
+                                 loader: { _ in full },
+                                 reducedLoader: { _ in reduced },
+                                 upgradePolicy: { index, current in abs(index - current) > 1 })
+        window.setCurrent(5)
+        await window.waitUntilSettled()
+        XCTAssertTrue(window.isFullResolution(at: 5))
+        XCTAssertFalse(window.isFullResolution(at: 2), "a half-size ring slot is not 1:1")
+        XCTAssertFalse(window.isFullResolution(at: 9), "no resident image, no pixels")
+        window.setCurrent(2)
+        await window.waitUntilSettled()
+        XCTAssertTrue(window.isFullResolution(at: 2))
+    }
+
+    func testFullResTierKnobsAreClampedToTheWindowExtent() {
+        UserDefaults.standard.set(200, forKey: "displayFullResBehind")
+        UserDefaults.standard.set(200, forKey: "displayFullResAhead")
+        defer {
+            UserDefaults.standard.removeObject(forKey: "displayFullResBehind")
+            UserDefaults.standard.removeObject(forKey: "displayFullResAhead")
+        }
+        XCTAssertEqual(ImageWindow.displayFullResBehind, ImageWindow.displayExtentBehind)
+        XCTAssertEqual(ImageWindow.displayFullResAhead, ImageWindow.displayExtentAhead)
+    }
+
     // MARK: Identity retargeting
 
     /// Thread-safe counter for loader/decode assertions.

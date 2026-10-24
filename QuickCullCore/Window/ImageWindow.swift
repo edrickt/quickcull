@@ -32,6 +32,11 @@ public final class ImageWindow {
     public var count: Int { ids.count }
 
     private let policy: WindowPolicy
+    /// Hard cap on resident images beyond the policy window (`nil` = the window
+    /// plus the recent viewport is the only bound). The grid has no meaningful
+    /// current position — it keeps the cells the user scrolled past — so its
+    /// memory must be bounded by a fixed viewport instead of by the shoot.
+    private let residentCap: Int?
     private let loader: (String) async -> CGImage?
     private let reducedLoader: ((String) async -> CGImage?)?
     /// True when the identity at `index` is outside the full tier of `current`.
@@ -82,9 +87,11 @@ public final class ImageWindow {
     /// over this one; `retarget(ids:)` requires identities.
     init(policy: WindowPolicy, ids: [String], loader: @escaping (String) async -> CGImage?,
          reducedLoader: ((String) async -> CGImage?)? = nil,
-         upgradePolicy: ((Int, Int) -> Bool)? = nil) {
+         upgradePolicy: ((Int, Int) -> Bool)? = nil,
+         residentCap: Int? = nil) {
         assert(Set(ids).count == ids.count, "ImageWindow identities must be unique")
         self.policy = policy
+        self.residentCap = residentCap
         self.ids = ids
         self.loader = loader
         self.reducedLoader = reducedLoader
@@ -120,12 +127,10 @@ public final class ImageWindow {
         loadTokens[id] = token
         taskByID[id] = Task { [weak self] in
             let image = await load(id)
-            guard let self else { return }
-            if self.loadTokens[id] == token {
-                self.inFlightIDs.remove(id)
-                self.taskByID.removeValue(forKey: id)
-                self.loadTokens.removeValue(forKey: id)
-            }
+            guard let self, self.loadTokens[id] == token else { return }
+            self.inFlightIDs.remove(id)
+            self.taskByID.removeValue(forKey: id)
+            self.loadTokens.removeValue(forKey: id)
             guard let position = self.positionsByID[id] else {
                 self.degradedIDs.remove(id)
                 return
@@ -136,7 +141,24 @@ public final class ImageWindow {
                 self.degradedIDs.remove(id)
                 return
             }
-            if let image { self.images[position] = image }
+            if let image {
+                self.images[position] = image
+            } else if Task.isCancelled {
+                // The decode was cancelled before it started (eviction, or a
+                // superseded tier) but the identity is wanted again. Retry,
+                // otherwise the slot keeps its placeholder until the user
+                // happens to scrub away and back.
+                self.startLoad(position)
+                return
+            }
+            // Landing inside the full tier while a reduced placeholder was still
+            // in flight must upgrade now: the `setCurrent` pass that would have
+            // done it skipped this index because a load was in flight.
+            if let upgradePolicy = self.upgradePolicy,
+               self.degradedIDs.contains(id),
+               !upgradePolicy(position, self.currentIndex) {
+                self.startLoad(position)
+            }
         }
     }
 
@@ -155,7 +177,9 @@ public final class ImageWindow {
     public func setCurrent(_ index: Int) {
         currentIndex = min(max(index, 0), max(count - 1, 0))
         let windowSet = Set(policy.window(around: currentIndex, count: count))
-        let keep = windowSet.union(ensuredIndices)
+        // Prune before evicting: the eviction pass keeps `ensuredIndices`, so an
+        // unbounded ensured set would let images survive the policy window.
+        pruneEnsuredIndices(windowSet: windowSet)
         evictOutsideWindow()
         for i in policy.loadOrder(current: currentIndex, count: count)
         where images[i] == nil && !isInFlight(i) {
@@ -170,14 +194,12 @@ public final class ImageWindow {
                 startLoad(i)
             }
         }
-        pruneEnsuredIndices(windowSet: windowSet, keep: keep, recent: [])
     }
 
     private var ensuredIndices: Set<Int> = []
     private var ensuredOrder: [Int] = [] // insertion order for LRU bounding
 
     public func ensureLoaded(indices: [Int]) {
-        let windowSet = Set(policy.window(around: currentIndex, count: count))
         let validNew = indices.filter { $0 >= 0 && $0 < count }
         for idx in validNew {
             if ensuredIndices.contains(idx) {
@@ -189,13 +211,15 @@ public final class ImageWindow {
                 ensuredOrder.append(idx)
             }
         }
-        let keep = windowSet.union(ensuredIndices)
+        let windowSet = Set(policy.window(around: currentIndex, count: count))
+        pruneEnsuredIndices(windowSet: windowSet)
         evictOutsideWindow()
-        // Only queue the explicitly ensured indices; window already queued by setCurrent.
+        // Only the surviving ensured indices load: the policy window was already
+        // queued by `setCurrent`, and a pruned cell must not decode on its way
+        // out of the residency bound.
         for i in ensuredIndices where images[i] == nil && !isInFlight(i) {
             startLoad(i)
         }
-        pruneEnsuredIndices(windowSet: windowSet, keep: keep, recent: validNew)
     }
 
     /// Evicts every resident image outside `window ∪ ensuredIndices` and
@@ -209,11 +233,11 @@ public final class ImageWindow {
             guard ids.indices.contains(i) else { continue }
             let id = ids[i]
             degradedIDs.remove(id)
-            // Drop the in-flight marker with the task: if the identity
-            // re-enters the window it must be able to queue a fresh load.
-            inFlightIDs.remove(id)
-            loadTokens.removeValue(forKey: id)
-            taskByID.removeValue(forKey: id)?.cancel()
+            // Cancel, but leave the in-flight marker and token to the task
+            // itself. The decode cannot be interrupted once it starts, so
+            // dropping the marker here would let the same identity decode twice
+            // at once and made `waitUntilSettled` return while work was running.
+            taskByID[id]?.cancel()
         }
     }
 
@@ -281,27 +305,27 @@ public final class ImageWindow {
         ensuredOrder = remappedOrder
     }
 
-    /// Bounds `ensuredIndices` to the window ∪ a small recent viewport:
-    /// drops entries outside `keep`, then LRU-caps the remainder at the 40
-    /// most recent ensures beyond the window. Without the cap, ensured
-    /// indices grow monotonically and retain thumbs for the whole shoot,
-    /// violating the bounded viewport + window invariant.
-    private func pruneEnsuredIndices(windowSet: Set<Int>, keep: Set<Int>, recent: [Int]) {
+    /// Bounds `ensuredIndices`: the policy window always survives, and beyond it
+    /// only the most recently ensured positions do, up to the cap. Without a
+    /// cap the ensured set grows monotonically and retains thumbnails for the
+    /// whole shoot; with the grid's `residentCap` it holds a fixed viewport.
+    private func pruneEnsuredIndices(windowSet: Set<Int>) {
         let maxViewport = 40
-        ensuredIndices = ensuredIndices.intersection(keep).filter { $0 >= 0 && $0 < count }
-        ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
-        let cap = windowSet.count + maxViewport
-        guard ensuredIndices.count > cap else { return }
-        let keepSet = windowSet
-            .union(ensuredOrder.suffix(maxViewport))
-            .union(recent)
-        for idx in ensuredIndices.subtracting(keepSet) {
-            ensuredIndices.remove(idx)
-        }
+        let budget = residentCap.map { max(0, $0 - windowSet.count) } ?? maxViewport
+        let keep = windowSet.union(ensuredOrder.suffix(budget))
+        ensuredIndices = ensuredIndices.filter { keep.contains($0) && $0 >= 0 && $0 < count }
         ensuredOrder = ensuredOrder.filter { ensuredIndices.contains($0) }
     }
 
     public func image(at index: Int) -> CGImage? { images[index] }
+
+    /// True when the resident image at `index` is the full-resolution decode
+    /// rather than a reduced placeholder. The loupe uses this to label what it
+    /// is actually showing instead of claiming 1:1 over a half-size preview.
+    public func isFullResolution(at index: Int) -> Bool {
+        guard images[index] != nil else { return false }
+        return !isDegraded(index)
+    }
 
     /// Awaits until all in-flight loads settle, the optional timeout
     /// expires, or the caller is cancelled (used by tests).
@@ -323,22 +347,31 @@ public final class ImageWindow {
     public static func thumbnails(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
         ImageWindow(policy: WindowPolicy(radius: Self.stripRadius),
                     ids: files.map(\.id),
-                    loader: thumbnailLoader(byID: filesByID(files), cache: cache))
+                    loader: thumbnailLoader(byID: filesByID(files), cache: cache),
+                    residentCap: Self.residentThumbCap)
     }
 
-    /// Grid window: every thumbnail is *eligible* (no sliding window), so
-    /// scrolling the grid never unloads a visible cell — the radius-30 window
-    /// did exactly that. Loading stays lazy: the grid never receives
-    /// `setCurrent`, so only the cells that actually appear are decoded (each
-    /// cell calls `ensureLoaded`) instead of the whole shoot at import time.
+    /// Grid window: no sliding window (scrolling the grid must never unload a
+    /// visible cell), bounded instead by `residentThumbCap`. Loading stays lazy:
+    /// the grid never receives `setCurrent`, so only the cells that actually
+    /// appear are decoded (each cell calls `ensureLoaded`) instead of the whole
+    /// shoot at import time — and only the most recent viewport stays resident.
+    ///
+    /// No cap is applied here: `residentCap` carries the bound, and the policy
+    /// window is just the always-resident slot the cap is measured against.
     public static func gridThumbnails(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
-        ImageWindow(policy: WindowPolicy(radius: files.count),
+        ImageWindow(policy: WindowPolicy(radius: 0),
                     ids: files.map(\.id),
-                    loader: thumbnailLoader(byID: filesByID(files), cache: cache))
+                    loader: thumbnailLoader(byID: filesByID(files), cache: cache),
+                    residentCap: Self.residentThumbCap)
     }
 
     /// Filmstrip window extent (see `thumbnails`).
     nonisolated static var stripRadius: Int { 30 }
+
+    /// Resident-thumbnail cap shared by the strip and the grid: one screenful
+    /// of strip cells. Thumbnail memory is bounded by this, never by shoot size.
+    nonisolated static var residentThumbCap: Int { 61 }
 
     private static func filesByID(_ files: [SessionFile]) -> [String: SessionFile] {
         var byID: [String: SessionFile] = [:]
@@ -353,13 +386,27 @@ public final class ImageWindow {
                                         cache: ImageCacheStore) -> (String) async -> CGImage? {
         { id in
             guard let file = byID[id] else { return nil }
-            let url = try? await cache.cacheURL(for: file)
-            return await Task.detached(priority: .utility) {
+            let url = try? cache.cacheURL(for: file)
+            return await detachedUnlessCancelled(priority: .utility) {
                 await thumbnailDecodeLimiter.withSlot {
                     guard !Task.isCancelled else { return nil }
                     return decodeJPEG(at: url, maxPixelSize: 320)
                 }
-            }.value
+            }
+        }
+    }
+
+    /// A detached task whose cancellation follows its caller's. `Task.detached`
+    /// alone breaks that link, which made every `Task.isCancelled` check inside a
+    /// decode unreachable: a superseded scrub kept its limiter slot and decoded
+    /// an image the user had already left.
+    private static func detachedUnlessCancelled<T: Sendable>(
+        priority: TaskPriority, _ work: @escaping @Sendable () async -> T) async -> T {
+        let task = Task.detached(priority: priority) { await work() }
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
         }
     }
 
@@ -389,30 +436,28 @@ public final class ImageWindow {
                            ids: files.map(\.id),
                            loader: { id in
             guard let file = byID[id] else { return nil }
-            let url = try? await cache.cacheURL(for: file)
-            guard let url else { return nil }
+            guard let url = try? cache.cacheURL(for: file) else { return nil }
             // A full-res 20-45 MP decode takes ~100-400 ms; run it off the
             // main actor (detached task) and throttle it through the shared
             // gate so concurrent fills stay bounded.
-            return await Task.detached(priority: .userInitiated) {
+            return await detachedUnlessCancelled(priority: .userInitiated) {
                 await displayDecodeLimiter.withSlot {
                     guard !Task.isCancelled else { return nil }
                     guard FileManager.default.fileExists(atPath: url.path) else { return nil }
                     return loadJPEGFullRes(at: url)
                 }
-            }.value
+            }
         },
         reducedLoader: { id in
             guard let file = byID[id] else { return nil }
-            let url = try? await cache.cacheURL(for: file)
-            guard let url else { return nil }
-            return await Task.detached(priority: .utility) {
+            guard let url = try? cache.cacheURL(for: file) else { return nil }
+            return await detachedUnlessCancelled(priority: .utility) {
                 await displayDecodeLimiter.withSlot {
                     guard !Task.isCancelled else { return nil }
                     guard FileManager.default.fileExists(atPath: url.path) else { return nil }
                     return loadJPEGHalfRes(at: url)
                 }
-            }.value
+            }
         },
         upgradePolicy: { index, current in
             index < current - fullBehind || index > current + fullAhead
@@ -426,17 +471,19 @@ public final class ImageWindow {
     nonisolated static var displayExtentAhead: Int { 20 }
 
     /// Full-res tier behind the current image (see `display`). Hidden
-    /// override: `defaults write com.quickcull displayFullResBehind N`.
+    /// override: `defaults write com.quickcull displayFullResBehind N`, clamped
+    /// to the window extent so a typo cannot decode the whole window full-res.
     nonisolated static var displayFullResBehind: Int {
         let n = UserDefaults.standard.integer(forKey: "displayFullResBehind")
-        return n > 0 ? n : 5
+        return min(n > 0 ? n : 5, displayExtentBehind)
     }
 
     /// Full-res tier ahead of the current image (see `display`). Hidden
-    /// override: `defaults write com.quickcull displayFullResAhead N`.
+    /// override: `defaults write com.quickcull displayFullResAhead N`, clamped
+    /// to the window extent.
     nonisolated static var displayFullResAhead: Int {
         let n = UserDefaults.standard.integer(forKey: "displayFullResAhead")
-        return n > 0 ? n : 10
+        return min(n > 0 ? n : 10, displayExtentAhead)
     }
 
     /// Half-size decode of a cached JPEG: asks the thumbnail API for half
