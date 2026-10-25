@@ -97,10 +97,16 @@ cleanly and 226 tests pass.
 
 `.pi-lens.json` disables the Swift LSP for this project for that reason, and
 `AGENTS.md` records the rule: `xcodebuild` is the only authoritative type check
-here. `Scripts/gen-compile-db.sh` emits a `compile_commands.json` (whole-module
-type definitions plus the LibRaw include path) for the case where the editor's
-language server is expected to be accurate; run it after
-`Scripts/build-libraw.sh`, and restart the language server so it reads the file.
+here. `Scripts/gen-compile-db.sh` emits a `compile_commands.json` in the shape
+sourcekit-lsp accepts: one `swift-frontend -typecheck -primary-file <file>` entry
+per source file, with the rest of the module as context, the LibRaw include
+path, and the toolchain's macro plugin path. All 23 entries type-check clean
+(`rc=0`), so the database itself is sound. Two things are needed before an
+editor profits from it: run `Scripts/build-libraw.sh` first (the headers are not
+in the tree), and make the server read the file — either start it with
+`--compile-commands-path`, or point it at the repository root. The driver's
+`-primary-file` spelling is rejected by this toolchain, which is why the entries
+call `swift-frontend` directly.
 
 ## 5. What was verified, and how
 
