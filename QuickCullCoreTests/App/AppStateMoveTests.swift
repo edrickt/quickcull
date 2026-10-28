@@ -137,6 +137,9 @@ final class AppStateMoveTests: XCTestCase {
         for _ in 0..<100 { if s.isMoving { break }; try? await Task.sleep(nanoseconds: 5_000_000) }
         s.setViewMode(.grid)
         XCTAssertEqual(s.viewMode, .scrub) // blocked
+        let indexBefore = s.session?.currentIndex
+        s.handle(.next)
+        XCTAssertEqual(s.session?.currentIndex, indexBefore, "scrub keys are blocked while moving")
         gate.signal()
         await task.value
     }

@@ -21,6 +21,18 @@ final class WindowPolicyTests: XCTestCase {
         XCTAssertTrue(policy.window(around: 0, count: 0).isEmpty)
     }
 
+    /// `window(around:)` clamps an out-of-range current, so `loadOrder` must
+    /// too: it used to return an empty order for a non-empty window, meaning the
+    /// two halves of the same policy disagreed about the same input.
+    func testLoadOrderClampsAnOutOfRangeCurrent() {
+        let policy = WindowPolicy(behind: 2, ahead: 2)
+        XCTAssertEqual(policy.loadOrder(current: 99, count: 5),
+                       policy.loadOrder(current: 4, count: 5))
+        XCTAssertEqual(policy.loadOrder(current: -3, count: 5),
+                       policy.loadOrder(current: 0, count: 5))
+        XCTAssertEqual(policy.loadOrder(current: 0, count: 0), [])
+    }
+
     func testLoadOrderStartsWithCurrentThenOutward() {
         let policy = WindowPolicy(radius: 2)
         XCTAssertEqual(policy.loadOrder(current: 5, count: 100),

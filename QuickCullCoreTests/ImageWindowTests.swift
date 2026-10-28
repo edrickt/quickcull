@@ -214,7 +214,7 @@ final class ImageWindowTests: XCTestCase {
         let window = ImageWindow(behind: 3, ahead: 3, count: 10,
                                  loader: { _ in full },
                                  reducedLoader: { _ in reduced },
-                                 upgradePolicy: { index, current in abs(index - current) > 1 })
+                                 isOutsideFullTier: { index, current in abs(index - current) > 1 })
         window.setCurrent(5)   // window [2,8]; full tier [4,6]
         await window.waitUntilSettled()
         XCTAssertEqual(window.image(at: 5)?.width, 64, "current is full-res")
@@ -274,7 +274,7 @@ final class ImageWindowTests: XCTestCase {
                                      await gate.wait()   // hold the reduced decode open
                                      return reduced
                                  },
-                                 upgradePolicy: { index, current in abs(index - current) > 1 })
+                                 isOutsideFullTier: { index, current in abs(index - current) > 1 })
         window.setCurrent(5)   // 4,5,6 full; 2,3,7,8 kick off reduced loads
         window.setCurrent(2)   // land on 2 while its reduced load is in flight
         await gate.open()
@@ -283,23 +283,120 @@ final class ImageWindowTests: XCTestCase {
                        "the in-flight reduced load must be followed by a full-res upgrade")
     }
 
-    /// The grid keeps the viewport the user reached, never the whole shoot:
-    /// residency is bounded by the fixed cap, not by the file count.
-    func testGridResidencyIsBoundedByTheFixedCap() async throws {
+    /// The grid's residency is the viewport it reports, not a fixed count. A cap
+    /// smaller than the viewport (61 on a maximized window showing ~150 tiles)
+    /// pruned the oldest visible tiles out of the ensured set, evicted them, and
+    /// nothing requested them again — grey tiles with filenames.
+    func testGridViewportKeepsEveryVisibleTileAndEvictsTheRest() async throws {
         let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         var files: [SessionFile] = []
         for i in 0..<100 {
             let file = SessionFile(url: fixtureDir.appendingPathComponent(String(format: "%03d.jpg", i)))
             files.append(file)
-            let destination = try cache.cacheURL(for: file)
-            try TestFixtures.writeJPEG(color: UInt8(i % 256), to: destination)
+            try TestFixtures.writeJPEG(color: UInt8(i % 256), to: try cache.cacheURL(for: file))
         }
         let window = ImageWindow.gridThumbnails(files: files, cache: cache)
-        window.ensureLoaded(indices: Array(0..<100))
+
+        window.setViewport(ids: Set(files.map(\.id)))
         await window.waitUntilSettled()
-        XCTAssertLessThanOrEqual(window.images.count, ImageWindow.residentThumbCap)
-        XCTAssertNotNil(window.image(at: 99), "the most recently ensured cell stays resident")
+        XCTAssertEqual(window.images.count, 100, "every visible tile stays resident, however large the viewport")
+        XCTAssertNotNil(window.image(at: 0), "the first tile was not pruned out of the viewport")
+
+        // Scrolling away replaces the viewport: the old tiles leave memory (the
+        // radius-0 policy window keeps one slot around index 0).
+        window.setViewport(ids: Set(files.suffix(10).map(\.id)))
+        await window.waitUntilSettled()
+        XCTAssertLessThanOrEqual(window.images.count, 11)
+        XCTAssertNil(window.image(at: 50), "a tile that left the viewport is evicted")
+        XCTAssertNotNil(window.image(at: 99))
+    }
+
+    /// The viewport is authoritative even on a window configured with a fixed
+    /// cap: routing the reported viewport through the cap's prune is exactly how
+    /// visible tiles were evicted and never requested again.
+    func testSetViewportIsNotTruncatedByTheResidentCap() async throws {
+        let files = (0..<20).map {
+            SessionFile(url: fixtureDir.appendingPathComponent(String(format: "%03d.jpg", $0)))
+        }
+        let window = ImageWindow(policy: WindowPolicy(radius: 0), ids: files.map(\.id),
+                                 loader: { id in
+                                     guard let source = CGImageSourceCreateWithURL(
+                                         URL(fileURLWithPath: id) as CFURL, nil) else { return nil }
+                                     return CGImageSourceCreateImageAtIndex(source, 0, nil)
+                                 },
+                                 residentCap: 5)
+        window.setViewport(ids: Set(files.map(\.id)))
+        await window.waitUntilSettled()
+        XCTAssertEqual(window.images.count, 20, "a 20-tile viewport stays resident on a cap-5 window")
+    }
+
+    /// The filmstrip keeps a bounded window (±30). A cell the user scrolls to
+    /// beyond it must still load: the ensured-set budget is `cap - window`, and a
+    /// cap equal to the window made that zero, silently dropping the request.
+    func testStripLoadsACellScrolledBeyondItsPolicyWindow() async throws {
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        var files: [SessionFile] = []
+        for i in 0..<count {
+            let file = SessionFile(url: fixtureDir.appendingPathComponent(String(format: "%03d.jpg", i)))
+            files.append(file)
+            try TestFixtures.writeJPEG(color: UInt8(i % 256), to: try cache.cacheURL(for: file))
+        }
+        let window = ImageWindow.thumbnails(files: files, cache: cache)
+        window.setCurrent(50)
+        await window.waitUntilSettled()
+        XCTAssertGreaterThan(ImageWindow.stripResidentCap, 2 * ImageWindow.stripRadius + 1,
+                             "the strip needs scroll slack above its preload window")
+
+        window.ensureLoaded(indices: [95])
+        await window.waitUntilSettled()
+
+        XCTAssertNotNil(window.image(at: 95), "a scrolled-to strip cell must load")
+        XCTAssertNotNil(window.image(at: 50), "the preload window survives")
+        XCTAssertLessThanOrEqual(window.images.count, ImageWindow.stripResidentCap)
+    }
+
+    /// The tier flag describes the resident bitmap, not the queued load: while a
+    /// full-res upgrade is in flight the slot still holds the half-size
+    /// placeholder, and the loupe must say `preview` (not `100%`) until the
+    /// upgrade lands.
+    func testLoupeDoesNotClaimSourcePixelsWhileTheUpgradeIsInFlight() async {
+        let gate = AsyncGate()
+        let full = TestFixtures.makeCGImage(width: 64, height: 64, color: 1)
+        let reduced = TestFixtures.makeCGImage(width: 32, height: 32, color: 2)
+        let window = ImageWindow(behind: 3, ahead: 3, count: 10,
+                                 loader: { _ in
+                                     await gate.wait()
+                                     return full
+                                 },
+                                 reducedLoader: { _ in reduced },
+                                 isOutsideFullTier: { index, current in abs(index - current) > 1 })
+        window.setCurrent(5)   // full tier 4,5,6 parks on the gate; the ring decodes reduced
+        let ringSettled = await waitUntil { window.image(at: 2) != nil }
+        XCTAssertTrue(ringSettled, "precondition: the half-size ring decode landed")
+        XCTAssertFalse(window.isFullResolution(at: 2), "a half-size placeholder is not source pixels")
+
+        window.setCurrent(2)   // queue the upgrade; it parks on the gate too
+        // Let the queue reach the upgrade load before asserting.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertFalse(window.isFullResolution(at: 2),
+                       "the label must not flip before the full-res bitmap is stored")
+
+        await gate.open()
+        await window.waitUntilSettled()
+        XCTAssertTrue(window.isFullResolution(at: 2), "landing upgrades, and then the label is honest")
+        XCTAssertEqual(window.image(at: 2)?.width, 64)
+    }
+
+    /// Polls `condition` on the main actor (tests are @MainActor).
+    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return condition()
     }
 
     /// The loupe labels itself from this: a reduced placeholder must not
@@ -310,7 +407,7 @@ final class ImageWindowTests: XCTestCase {
         let window = ImageWindow(behind: 3, ahead: 3, count: 10,
                                  loader: { _ in full },
                                  reducedLoader: { _ in reduced },
-                                 upgradePolicy: { index, current in abs(index - current) > 1 })
+                                 isOutsideFullTier: { index, current in abs(index - current) > 1 })
         window.setCurrent(5)
         await window.waitUntilSettled()
         XCTAssertTrue(window.isFullResolution(at: 5))

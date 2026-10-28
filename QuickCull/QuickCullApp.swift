@@ -15,14 +15,47 @@ extension FocusedValues {
     }
 }
 
+/// Wipes the decode cache before the process exits.
+///
+/// `willTerminate` is too late for that: it is posted on the way to `exit()`, so
+/// the async wipe it used to schedule had no run loop left and a normal quit
+/// kept the whole cache (gigabytes at 45 MP) until the next launch's wipe.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var isWiping = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isWiping else { return .terminateNow }
+        isWiping = true
+        let cache = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL())
+        Task { @MainActor in
+            await Self.wipe(cache)
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    /// Deletes the cache, but never holds the quit open longer than a few
+    /// seconds: a hung volume must not turn Quit into a freeze, and the launch
+    /// wipe covers whatever is left.
+    private static func wipe(_ cache: ImageCacheStore, timeout: Double = 5) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { try? await cache.wipe() }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000)) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+}
+
 @main
 struct QuickCullApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
-    /// One monitor and one quit observer for the whole app, not per window:
-    /// closing a window must not disarm the keys or the quit-time cache wipe
-    /// for the windows still open. Installed once by the first window's task.
+    /// One monitor for the whole app, not per window: closing a window must not
+    /// disarm the keys for the windows still open. Installed once by the first
+    /// window's task.
     @State private var monitor: KeyboardMonitor?
-    @State private var terminateObserver: NSObjectProtocol?
 
     @FocusedValue(\.newSessionAction) private var newSessionAction
 
@@ -40,16 +73,6 @@ struct QuickCullApp: App {
                     let m = KeyboardMonitor()
                     m.start(appState: appState)
                     monitor = m
-                    // Best-effort cache wipe on normal quit. Not guaranteed
-                    // (force-quit skips it). The launch wipe is authoritative.
-                    // `cache` is captured here (main actor) rather than read
-                    // inside the Sendable observer closure.
-                    let cache = appState.cache
-                    terminateObserver = NotificationCenter.default.addObserver(
-                        forName: NSApplication.willTerminateNotification,
-                        object: nil, queue: .main) { _ in
-                        Task { try? await cache.wipe() }
-                    }
                 }
         }
         .commands {

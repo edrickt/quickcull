@@ -398,6 +398,23 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(state.gridSelection.isEmpty)
     }
 
+    /// Scrub keys in grid moved an index nothing on screen shows; returning to
+    /// Single then opened a different photo than the one the user left.
+    func testGridScrubKeysDoNotMoveTheInvisibleCurrentIndex() async throws {
+        let files = try (0..<3).map { try TestFixtures.makeRawFile(named: "n\($0).cr2", in: tempDir) }
+        let state = makeState()
+        state.importFiles(urls: files)
+        await waitForScrubbing(state)
+        state.handle(.next)
+        XCTAssertEqual(state.session?.currentIndex, 1)
+        state.setViewMode(.grid)
+        state.handle(.next)
+        state.handle(.jumpForward)
+        XCTAssertEqual(state.session?.currentIndex, 1, "grid has no visible current photo to move")
+        state.setViewMode(.scrub)
+        XCTAssertEqual(state.session?.currentIndex, 1)
+    }
+
     func testGridSelectionSingleCmdShiftRange() async throws {
         let files = try (0..<5).map { try TestFixtures.makeRawFile(named: "g\($0).cr2", in: tempDir) }
         let state = makeState()
@@ -429,15 +446,19 @@ final class AppStateTests: XCTestCase {
         XCTAssertTrue(state.gridSelection.isEmpty, "grid should deselect after any flag action (Ctrl+A + Z should not stay highlighted)")
     }
 
-    func testHandleToggleFlagInGridEmptyFallsBackToSingle() async throws {
+    /// Grid marks no current photo, so a flag key with an empty selection used to
+    /// flag wherever scrub left off — invisible, possibly off-screen, and later
+    /// removed by a `Trash R` the user never associated with it.
+    func testGridFlagKeyWithNoSelectionIsIgnored() async throws {
         let files = try (0..<2).map { try TestFixtures.makeRawFile(named: "e\($0).cr2", in: tempDir) }
         let state = makeState()
         state.importFiles(urls: files)
         await waitForScrubbing(state)
         state.setViewMode(.grid)
         XCTAssertTrue(state.gridSelection.isEmpty)
-        state.handle(.toggleFlag(.red)) // no selection → flags current (index 0)
-        XCTAssertEqual(state.session?.flaggedCount, 1)
+        state.handle(.toggleFlag(.red))
+        XCTAssertEqual(state.session?.flaggedCount, 0, "no visible target, so nothing is flagged")
+        XCTAssertEqual(state.session?.flagRevision, 0)
     }
 
     func testGridSelectionPrunedAfterCommitAndFilter() async throws {
@@ -488,11 +509,10 @@ final class AppStateTests: XCTestCase {
         let state = makeState()
         state.importFiles(urls: [a])
         await waitForScrubbing(state)
-        state.setViewMode(.grid)
-        XCTAssertEqual(state.viewMode, .grid)
-        // Empty selection in grid falls back to single-flag current
         state.handle(.toggleFlag(.red))
         XCTAssertEqual(state.session?.flaggedCount, 1)
+        state.setViewMode(.grid)
+        XCTAssertEqual(state.viewMode, .grid)
         state.requestCommit()
         await state.confirmCommit()
         XCTAssertEqual(state.phase, .empty)
@@ -552,7 +572,8 @@ final class AppStateTests: XCTestCase {
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
         let c = try TestFixtures.makeRawFile(named: "c.cr2", in: tempDir)
-        let state = makeState()
+        let trasher = StubTrasher()
+        let state = makeState(trasher: trasher)
         state.importFiles(urls: [a, b, c])
         await waitForScrubbing(state)
         XCTAssertEqual(state.viewMode, .scrub)
@@ -573,10 +594,27 @@ final class AppStateTests: XCTestCase {
         // Next beyond last clamps (move does not exceed)
         state.handle(.next)
         XCTAssertEqual(state.session?.currentIndex, 2)
-        // Toggle Split disabled while committing
-        state.requestCommit()
-        // Simulate isCommitting true via flagged commit path? Just test setViewMode guard:
-        // isCommitting is false initially; after requestCommit without confirm, still false so not testable here.
+        // While a commit is in flight, view-mode and key input are blocked. The
+        // old tail asserted nothing and claimed the guard was untestable; a gated
+        // trasher makes it observable.
+        state.handle(.toggleFlag(.red))
+        let gate = DispatchSemaphore(value: 0)
+        trasher.gate = gate
+        XCTAssertTrue(state.requestCommit(), "the current photo is flagged")
+        let commit = Task { await state.confirmCommit() }
+        for _ in 0..<200 {
+            if state.isCommitting { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertTrue(state.isCommitting, "precondition: commit in flight")
+        state.setViewMode(.grid)
+        XCTAssertEqual(state.viewMode, .split, "view mode is blocked while committing")
+        let indexBefore = state.session?.currentIndex
+        state.handle(.next)
+        XCTAssertEqual(state.session?.currentIndex, indexBefore, "scrub keys are blocked while committing")
+        gate.signal()
+        await commit.value
+        XCTAssertFalse(state.isCommitting)
     }
 
     func testSplitViewModeResetOnNewSession() async throws {

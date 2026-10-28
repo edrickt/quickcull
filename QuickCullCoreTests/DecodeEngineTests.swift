@@ -204,4 +204,41 @@ final class DecodeEngineTests: XCTestCase {
         XCTAssertEqual(a.width, b.width)
         XCTAssertEqual(a.height, b.height)
     }
+
+    /// A decoder that finishes the first file last, so completion order differs
+    /// from input order.
+    private final class ReversedLatencyDecoder: RawDecoding, @unchecked Sendable {
+        func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap {
+            if url.lastPathComponent.hasPrefix("a") {
+                let semaphore = DispatchSemaphore(value: 0)
+                Task { try? await Task.sleep(nanoseconds: 150_000_000); semaphore.signal() }
+                semaphore.wait()
+            }
+            let width = 4, height = 2
+            let provider = CGDataProvider(data: Data(repeating: 9, count: width * height * 3) as CFData)!
+            let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 24,
+                                bytesPerRow: width * 3, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                                provider: provider, decode: nil, shouldInterpolate: false,
+                                intent: .defaultIntent)!
+            return RawBitmap(image: image, width: width, height: height, flip: 0)
+        }
+    }
+
+    /// The failure banner names the first three failures, so the same import must
+    /// report them in the same order every time; outcomes used to arrive in
+    /// completion order.
+    func testOutcomesAreReportedInImportOrder() async throws {
+        let files = TestFixtures.makeFiles(["a.cr2", "b.cr2", "c.cr2", "d.cr2"])
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let engine = DecodeEngine(decoder: ReversedLatencyDecoder(), cache: cache, workerLimit: 4)
+
+        let events = await collect(engine.decodeAll(files: files))
+        guard case .completed(let outcomes) = events.last else {
+            return XCTFail("expected completed event")
+        }
+        XCTAssertEqual(outcomes.map { $0.file.url.lastPathComponent },
+                       ["a.cr2", "b.cr2", "c.cr2", "d.cr2"])
+    }
 }

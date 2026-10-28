@@ -33,14 +33,18 @@ public struct WindowPolicy {
 
     /// Load order: current index first, then outward by distance
     /// (after-neighbor before before-neighbor, each direction capped by its
-    /// own side of the window).
+    /// own side of the window). `current` is clamped exactly as `window`
+    /// clamps it, so the two halves of the policy cannot disagree about an
+    /// out-of-range input (which returned an empty order for a non-empty
+    /// window).
     public func loadOrder(current: Int, count: Int) -> [Int] {
         let range = window(around: current, count: count)
         guard !range.isEmpty else { return [] }
+        let center = min(max(current, 0), count - 1)
         var order: [Int] = []
         for distance in 0...radius {
-            let after = current + distance
-            let before = current - distance
+            let after = center + distance
+            let before = center - distance
             if distance <= ahead, range.contains(after) { order.append(after) }
             if distance > 0, distance <= behind, range.contains(before) { order.append(before) }
         }

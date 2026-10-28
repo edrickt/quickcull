@@ -35,8 +35,12 @@ final class ImageCacheStoreTests: XCTestCase {
     func testCacheKeyChangesWhenMtimeChanges() async throws {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
         let key1 = try await store.cacheURL(for: file)
-        // touch the file: mtime changes
-        try Data([0x01]).write(to: file.url)
+        // Change only the mtime: rewriting the contents also changed the size,
+        // which made the test pass even with mtime dropped from the key.
+        let sameSize = try Data(contentsOf: file.url)
+        try sameSize.write(to: file.url)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(120)], ofItemAtPath: file.url.path)
         let key2 = try await store.cacheURL(for: file)
         XCTAssertNotEqual(key1, key2)
     }
@@ -109,7 +113,7 @@ final class ImageCacheStoreTests: XCTestCase {
     func testStoreAndLoadHistogramRoundTrip() async throws {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
         let hist = TestFixtures.makeFullHistogram()
-        try await store.storeHistogram(hist, for: file)
+        try await store.storeHistogram(hist, beside: try await store.cacheURL(for: file))
         let loaded = try await store.loadHistogram(for: file)
         XCTAssertEqual(loaded, hist)
     }
@@ -118,7 +122,7 @@ final class ImageCacheStoreTests: XCTestCase {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "e.cr2", in: base))
         var lum = [Int](repeating: 0, count: RawHistogram.binCount); lum[5]=42; lum[200]=7
         let hist = TestFixtures.makeFullHistogram(luminance: lum)
-        try await store.storeHistogram(hist, for: file)
+        try await store.storeHistogram(hist, beside: try await store.cacheURL(for: file))
         let loaded = try await store.loadHistogram(for: file)
         XCTAssertEqual(loaded, hist)
     }
@@ -156,12 +160,79 @@ final class ImageCacheStoreTests: XCTestCase {
 
     func testStoreJPEGWithQualityProducesDecodableAndClamped() async throws {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "q.cr2", in: base))
-        let bmp = RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128), width: 32, height: 16, flip: 0)
+        // A flat colour compresses to nearly the same bytes at any quality, so
+        // the fixture must carry detail for the quality to be observable (the
+        // old assertion only checked that a file appeared, which an ignored
+        // quality argument also satisfied).
+        let bmp = RawBitmap(image: Self.noiseImage(width: 48, height: 32), width: 48, height: 32, flip: 0)
+
         let dest70 = try await store.storeJPEG(bmp, for: file, quality: 0.70)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dest70.path))
-        // Out-of-range clamped, not thrown
+        let size70 = try Data(contentsOf: dest70).count
+
+        let dest95 = try await store.storeJPEG(bmp, for: file, quality: 0.95)
+        let size95 = try Data(contentsOf: dest95).count
+        XCTAssertLessThan(size70, size95, "lower quality must produce a smaller JPEG")
+
+        // Out-of-range clamped, not thrown: 2.0 encodes exactly like 0.95.
         let destClamped = try await store.storeJPEG(bmp, for: file, quality: 2.0)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: destClamped.path))
+        XCTAssertEqual(try Data(contentsOf: destClamped).count, size95, "quality is clamped to 0.95")
+    }
+
+    private static func noiseImage(width: Int, height: Int) -> CGImage {
+        var bytes = [UInt8](repeating: 0, count: width * height * 3)
+        var seed: UInt32 = 1_234_567
+        for index in 0..<bytes.count {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            bytes[index] = UInt8((seed >> 16) & 0xFF)
+        }
+        let provider = CGDataProvider(data: Data(bytes) as CFData)!
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 24,
+                       bytesPerRow: width * 3, space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: false,
+                       intent: .defaultIntent)!
+    }
+
+    /// A sidecar written by a session that was wiped mid-write must not land in
+    /// the fresh cache (AUD-31 closed this for the JPEG; the histogram is the
+    /// same boundary and is written right after it).
+    func testHistogramBegunBeforeAWipeDoesNotLand() async throws {
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "h.cr2", in: base))
+        let jpeg = try await store.cacheURL(for: file)
+        let generation = await store.currentStoreGeneration()
+        try await store.wipe()
+        do {
+            try await store.storeHistogram(TestFixtures.makeFullHistogram(),
+                                           beside: jpeg, assuming: generation)
+            XCTFail("a sidecar from before the wipe must be rejected")
+        } catch CacheError.staleGeneration {
+            // expected
+        }
+        let afterWipe = try await store.loadHistogram(for: file)
+        XCTAssertNil(afterWipe)
+    }
+
+    /// Two stores of the same identity used to share one `.tmp` path, truncating
+    /// each other's encode and failing the loser with ENOENT.
+    func testConcurrentStoresOfTheSameFileAllSucceed() async throws {
+        let file = SessionFile(url: try TestFixtures.makeRawFile(named: "c.cr2", in: base))
+        let bitmap = RawBitmap(image: Self.noiseImage(width: 48, height: 32), width: 48, height: 32, flip: 0)
+        let dest = try await store.cacheURL(for: file)
+
+        let cache = store!
+        for _ in 0..<5 {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for _ in 0..<4 {
+                    group.addTask { _ = try await cache.storeJPEG(bitmap, for: file, quality: 0.75) }
+                }
+                try await group.waitForAll()
+            }
+        }
+        guard let source = CGImageSourceCreateWithURL(dest as CFURL, nil) else {
+            return XCTFail("the surviving entry must be a decodable JPEG")
+        }
+        XCTAssertEqual(CGImageSourceGetCount(source), 1)
     }
 
     /// New Session cancels the import and wipes fire-and-forget, so a decode

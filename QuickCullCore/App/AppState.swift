@@ -152,6 +152,19 @@ public final class AppState {
         gridAnchorID = nil
     }
 
+    /// Aborts a running import and returns to the importer. The decode workers
+    /// stop at their next queue pop; previews already written stay until the
+    /// launch wipe (they are keyed by the originals, so they are never stale).
+    public func cancelImport() {
+        importTask?.cancel()
+        importTask = nil
+        importFailures = []
+        gridSelection = []
+        gridAnchorID = nil
+        resetTransientState()
+        transitionToEmptySession()
+    }
+
     public func setLoupeActive(_ active: Bool) {
         guard phase == .scrubbing, !isMoving, !isCommitting else {
             if isLoupeActive { isLoupeActive = false }
@@ -176,7 +189,7 @@ public final class AppState {
             // through the same empty transition every other path uses.
             importFailures = unique.map {
                 DecodeOutcome(file: SessionFile(url: $0),
-                              error: .cannotOpen("Unsupported format"))
+                              error: .cannotOpen(ImportFailureSummary.unsupportedMessage))
             }
             resetTransientState()
             gridSelection = []
@@ -191,7 +204,7 @@ public final class AppState {
         let unsupportedFailures = unique
             .filter { !RawFileIdentity.isSupported($0) }
             .map { DecodeOutcome(file: SessionFile(url: $0),
-                                 error: .cannotOpen("Unsupported format")) }
+                                 error: .cannotOpen(ImportFailureSummary.unsupportedMessage)) }
         session = Session(files: files)
         sessionGeneration += 1
         importFailures = []
@@ -219,7 +232,7 @@ public final class AppState {
                             gridSelection = gridSelection.filter { s.contains(id: $0) }
                         }
                     }
-                    if session?.isEmpty == true {
+                    if session?.totalCount == 0 {
                         // All failed: back to the empty state; its banner
                         // surfaces the failures.
                         transitionToEmptySession()
@@ -242,8 +255,8 @@ public final class AppState {
         let ids = files.map(\.id)
         if thumbWindow == nil || gridThumbs == nil || displayImages == nil
             || windowsGeneration != sessionGeneration {
-            // Strip stays bounded (radius 30); the grid keeps every thumbnail
-            // eligible but loads only the cells that appear.
+            // The strip stays bounded by its window plus scroll slack; the grid
+            // is bounded by the viewport its cells report.
             thumbWindow = ImageWindow.thumbnails(files: files, cache: cache)
             gridThumbs = ImageWindow.gridThumbnails(files: files, cache: cache)
             displayImages = ImageWindow.display(files: files, cache: cache)
@@ -274,12 +287,24 @@ public final class AppState {
         guard let session, phase == .scrubbing, !isMoving, !isCommitting,
               pendingCommitCount == 0, pendingMoveCount == 0 else { return }
         switch action {
-        case .next: session.move(by: 1)
-        case .previous: session.move(by: -1)
-        case .jumpForward: session.move(by: 10)
-        case .jumpBack: session.move(by: -10)
+        case .next, .previous, .jumpForward, .jumpBack:
+            // Grid shows no current photo and never scrolls to one, so a scrub
+            // key there only changes which photo Single opens on — invisible
+            // input whose only effect surfaces later.
+            guard viewMode != .grid else { return }
+            switch action {
+            case .next: session.move(by: 1)
+            case .previous: session.move(by: -1)
+            case .jumpForward: session.move(by: 10)
+            default: session.move(by: -10)
+            }
         case .toggleFlag(let color):
-            if viewMode == .grid && !gridSelection.isEmpty {
+            if viewMode == .grid {
+                // Grid marks no current photo, so a flag key with an empty
+                // selection has no visible target: the photo it would flag is
+                // where scrub left off, possibly off-screen. Batch-flag only
+                // what is selected and on screen.
+                guard !gridSelection.isEmpty else { return }
                 // A selection outlives a filter switch on purpose (returning to
                 // All restores it), so flag only the ids on screen right now —
                 // a batch action must never reach a photo the user cannot see.
@@ -356,7 +381,10 @@ public final class AppState {
         }
         let lo = min(anchorIdx, targetIdx), hi = max(anchorIdx, targetIdx)
         let rangeIDs = session.files[lo...hi].map(\.id)
-        gridSelection.formUnion(rangeIDs)
+        // Finder semantics: shift-click replaces the range anchored at the
+        // original anchor, so shrinking the target shrinks the selection.
+        // (Unioning made a range only ever grow.)
+        gridSelection = Set(rangeIDs)
     }
 
     public func handleGridTap(id: String, isCmd: Bool, isShift: Bool) {
@@ -405,11 +433,20 @@ public final class AppState {
 /// (`pending*` -> `isCommitting`/`isMoving` -> `installWindows` or the empty
 /// transition) and never touch the import/scrub paths.
 extension AppState {
-    public func requestCommit(color: FlagColor? = nil) {
-        guard phase == .scrubbing, !isMoving, !isCommitting else { return }
-        pendingCommitFiles = session?.flaggedFiles(color) ?? []
+    @discardableResult
+    public func requestCommit(color: FlagColor? = nil) -> Bool {
+        // One pending request per app, because `AppState` is shared by every
+        // window: without this, window B's request would overwrite the set
+        // window A's dialog already named, and A's confirm would commit B's.
+        guard phase == .scrubbing, !isMoving, !isCommitting,
+              pendingCommitCount == 0, pendingMoveCount == 0 else { return false }
+        let files = session?.flaggedFiles(color) ?? []
+        // Nothing to confirm: leave the slot untouched rather than half-set.
+        guard !files.isEmpty else { return false }
+        pendingCommitFiles = files
         pendingCommitColor = color
-        pendingCommitCount = pendingCommitFiles.count
+        pendingCommitCount = files.count
+        return true
     }
 
     public func confirmCommit() async {
@@ -442,7 +479,10 @@ extension AppState {
         pendingCommitColor = nil
         pendingCommitFiles = []
         isCommitting = false
-        if session.isEmpty {
+        // `isEmpty` is the projection; a commit made from the empty-filter
+        // placeholder leaves it empty while files remain, and that must not
+        // read as "the session is finished".
+        if session.totalCount == 0 {
             transitionToEmptySession()
         } else {
             installWindows(for: session.files)
@@ -457,12 +497,18 @@ extension AppState {
         pendingCommitFiles = []
     }
 
-    public func requestMove(to dest: URL, color: FlagColor? = nil) {
-        guard phase == .scrubbing, !isMoving, !isCommitting else { return }
-        pendingMoveFiles = session?.flaggedFiles(color) ?? []
-        pendingMoveCount = pendingMoveFiles.count
+    @discardableResult
+    public func requestMove(to dest: URL, color: FlagColor? = nil) -> Bool {
+        // See `requestCommit`: the pending slot is app-wide.
+        guard phase == .scrubbing, !isMoving, !isCommitting,
+              pendingCommitCount == 0, pendingMoveCount == 0 else { return false }
+        let files = session?.flaggedFiles(color) ?? []
+        guard !files.isEmpty else { return false }
+        pendingMoveFiles = files
+        pendingMoveCount = files.count
         pendingMoveDestination = dest
         pendingMoveColor = color
+        return true
     }
     public func cancelMove() {
         guard !isMoving, !isCommitting else { return }
@@ -503,7 +549,8 @@ extension AppState {
         pendingMoveColor = nil
         pendingMoveFiles = []
         isMoving = false
-        if session.isEmpty {
+        // See `confirmCommit`: `totalCount`, not the projection.
+        if session.totalCount == 0 {
             transitionToEmptySession()
         } else {
             installWindows(for: session.files)

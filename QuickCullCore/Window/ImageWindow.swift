@@ -16,7 +16,7 @@ import Observation
 /// identity survives. That is what lets a filter switch or a flag drop-out
 /// change the visible sequence without re-decoding the shoot.
 ///
-/// Optional tiering: when `reducedLoader` + `upgradePolicy` are supplied,
+/// Optional tiering: when `reducedLoader` + `isOutsideFullTier` are supplied,
 /// indices outside the full tier load a reduced-size placeholder (half-size
 /// decode) and are automatically re-run at full resolution once they enter
 /// the tier (i.e. when the user lands on them). This keeps full-res memory
@@ -39,8 +39,11 @@ public final class ImageWindow {
     private let residentCap: Int?
     private let loader: (String) async -> CGImage?
     private let reducedLoader: ((String) async -> CGImage?)?
-    /// True when the identity at `index` is outside the full tier of `current`.
-    private let upgradePolicy: ((Int, Int) -> Bool)?
+    /// True when the identity at `index` is outside the full tier of `current`
+    /// and therefore loads the reduced placeholder. (The name is the predicate
+    /// itself: `true` means reduced, not "should upgrade" — the tier test it
+    /// replaces was read backwards.)
+    private let isOutsideFullTier: ((Int, Int) -> Bool)?
     /// Identity → position in `ids`; rebuilt whenever `ids` changes.
     private var positionsByID: [String: Int] = [:]
     /// Identities whose resident image is a reduced-size placeholder; the
@@ -72,22 +75,22 @@ public final class ImageWindow {
                   loader: Self.positionalLoader(loader))
     }
 
-    /// Tiered window: see the type doc for `reducedLoader`/`upgradePolicy`.
+    /// Tiered window: see the type doc for `reducedLoader`/`isOutsideFullTier`.
     convenience init(behind: Int, ahead: Int, count: Int,
                      loader: @escaping (Int) async -> CGImage?,
                      reducedLoader: @escaping (Int) async -> CGImage?,
-                     upgradePolicy: @escaping (Int, Int) -> Bool) {
+                     isOutsideFullTier: @escaping (Int, Int) -> Bool) {
         self.init(policy: WindowPolicy(behind: behind, ahead: ahead), ids: Self.syntheticIDs(count),
                   loader: Self.positionalLoader(loader),
                   reducedLoader: Self.positionalLoader(reducedLoader),
-                  upgradePolicy: upgradePolicy)
+                  isOutsideFullTier: isOutsideFullTier)
     }
 
     /// Identity-addressed window. Every other initializer is a convenience
     /// over this one; `retarget(ids:)` requires identities.
     init(policy: WindowPolicy, ids: [String], loader: @escaping (String) async -> CGImage?,
          reducedLoader: ((String) async -> CGImage?)? = nil,
-         upgradePolicy: ((Int, Int) -> Bool)? = nil,
+         isOutsideFullTier: ((Int, Int) -> Bool)? = nil,
          residentCap: Int? = nil) {
         assert(Set(ids).count == ids.count, "ImageWindow identities must be unique")
         self.policy = policy
@@ -95,7 +98,7 @@ public final class ImageWindow {
         self.ids = ids
         self.loader = loader
         self.reducedLoader = reducedLoader
-        self.upgradePolicy = upgradePolicy
+        self.isOutsideFullTier = isOutsideFullTier
         for (position, id) in ids.enumerated() { positionsByID[id] = position }
     }
 
@@ -119,8 +122,7 @@ public final class ImageWindow {
         let id = ids[index]
         guard !inFlightIDs.contains(id) else { return }
         inFlightIDs.insert(id)
-        let useReduced = reducedLoader != nil && (upgradePolicy?(index, currentIndex) ?? false)
-        if useReduced { degradedIDs.insert(id) } else { degradedIDs.remove(id) }
+        let useReduced = reducedLoader != nil && (isOutsideFullTier?(index, currentIndex) ?? false)
         let load = useReduced ? (reducedLoader ?? loader) : loader
         nextLoadToken += 1
         let token = nextLoadToken
@@ -143,6 +145,11 @@ public final class ImageWindow {
             }
             if let image {
                 self.images[position] = image
+                // The tier flag describes the bitmap that is actually resident,
+                // so it changes with the write, never when the load is queued:
+                // clearing it up front made the loupe claim "100%" over the
+                // half-size placeholder for the length of the upgrade decode.
+                if useReduced { self.degradedIDs.insert(id) } else { self.degradedIDs.remove(id) }
             } else if Task.isCancelled {
                 // The decode was cancelled before it started (eviction, or a
                 // superseded tier) but the identity is wanted again. Retry,
@@ -154,9 +161,9 @@ public final class ImageWindow {
             // Landing inside the full tier while a reduced placeholder was still
             // in flight must upgrade now: the `setCurrent` pass that would have
             // done it skipped this index because a load was in flight.
-            if let upgradePolicy = self.upgradePolicy,
+            if let isOutsideFullTier = self.isOutsideFullTier,
                self.degradedIDs.contains(id),
-               !upgradePolicy(position, self.currentIndex) {
+               !isOutsideFullTier(position, self.currentIndex) {
                 self.startLoad(position)
             }
         }
@@ -188,9 +195,9 @@ public final class ImageWindow {
         // Upgrade pass: indices that entered the full tier (typically the
         // image the user just landed on) re-run at full resolution, so the
         // loupe is always true 1:1 even after a far jump.
-        if let upgradePolicy {
+        if let isOutsideFullTier {
             for i in windowSet
-            where isDegraded(i) && !upgradePolicy(i, currentIndex) && !isInFlight(i) {
+            where isDegraded(i) && !isOutsideFullTier(i, currentIndex) && !isInFlight(i) {
                 startLoad(i)
             }
         }
@@ -218,6 +225,40 @@ public final class ImageWindow {
         // queued by `setCurrent`, and a pruned cell must not decode on its way
         // out of the residency bound.
         for i in ensuredIndices where images[i] == nil && !isInFlight(i) {
+            startLoad(i)
+        }
+    }
+
+    /// Replaces the on-screen set with `ids`.
+    ///
+    /// A lazily-scrolled surface knows its own viewport and the window does
+    /// not, so the grid reports it here instead of calling `ensureLoaded` once
+    /// per cell. Residency is then exactly the visible viewport plus the policy
+    /// window — which is the promise ("bounded by a fixed viewport"), and it
+    /// keeps holding on a display whose viewport is larger than any fixed cap.
+    /// `ensureLoaded` silently dropped requests that did not fit `residentCap`,
+    /// which left cells the user had scrolled to permanently blank.
+    ///
+    /// Identities, not positions: a filter change or a commit renumbers the grid
+    /// under a cell that does not re-appear, and positions would then name the
+    /// wrong photos.
+    public func setViewport(ids: Set<String>) {
+        var positions: Set<Int> = []
+        positions.reserveCapacity(ids.count)
+        for id in ids {
+            if let position = positionsByID[id] { positions.insert(position) }
+        }
+        ensuredIndices = positions
+        ensuredOrder = positions.sorted()
+        let windowSet = Set(policy.window(around: currentIndex, count: count))
+        // Loads for cells that left the viewport are cancelled before eviction:
+        // they hold no image yet, so nothing else would stop them.
+        for (id, task) in taskByID where !ids.contains(id) {
+            guard let position = positionsByID[id], !windowSet.contains(position) else { continue }
+            task.cancel()
+        }
+        evictOutsideWindow()
+        for i in ensuredOrder where images[i] == nil && !isInFlight(i) {
             startLoad(i)
         }
     }
@@ -348,30 +389,37 @@ public final class ImageWindow {
         ImageWindow(policy: WindowPolicy(radius: Self.stripRadius),
                     ids: files.map(\.id),
                     loader: thumbnailLoader(byID: filesByID(files), cache: cache),
-                    residentCap: Self.residentThumbCap)
+                    residentCap: Self.stripResidentCap)
     }
 
-    /// Grid window: no sliding window (scrolling the grid must never unload a
-    /// visible cell), bounded instead by `residentThumbCap`. Loading stays lazy:
-    /// the grid never receives `setCurrent`, so only the cells that actually
-    /// appear are decoded (each cell calls `ensureLoaded`) instead of the whole
-    /// shoot at import time — and only the most recent viewport stays resident.
+    /// Grid window: residency is the viewport the grid reports through
+    /// `setViewport`, plus the policy window (radius 0 = the current slot).
+    /// Loading stays lazy — no `setCurrent` — so only the cells that appear are
+    /// decoded rather than the whole shoot at import time.
     ///
-    /// No cap is applied here: `residentCap` carries the bound, and the policy
-    /// window is just the always-resident slot the cap is measured against.
+    /// No `residentCap`: a fixed cap could be smaller than the visible viewport
+    /// on a large display, and anything pruned out of the viewport was evicted
+    /// and never requested again (the cell's task had already run), leaving
+    /// grey tiles. The viewport is the bound.
     public static func gridThumbnails(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
         ImageWindow(policy: WindowPolicy(radius: 0),
                     ids: files.map(\.id),
-                    loader: thumbnailLoader(byID: filesByID(files), cache: cache),
-                    residentCap: Self.residentThumbCap)
+                    loader: thumbnailLoader(byID: filesByID(files), cache: cache))
     }
 
     /// Filmstrip window extent (see `thumbnails`).
     nonisolated static var stripRadius: Int { 30 }
 
-    /// Resident-thumbnail cap shared by the strip and the grid: one screenful
-    /// of strip cells. Thumbnail memory is bounded by this, never by shoot size.
-    nonisolated static var residentThumbCap: Int { 61 }
+    /// Resident-thumbnail cap for the strip: its preload window plus room for
+    /// the cells a user scrolls to beyond it.
+    ///
+    /// The slack is load-bearing, not decoration: `pruneEnsuredIndices` gives
+    /// out-of-window ensured cells `cap - window` slots, so a cap equal to the
+    /// window (61) made that budget zero and silently dropped every
+    /// `ensureLoaded` for a cell the user had scrolled to, leaving permanent
+    /// placeholders.
+    nonisolated static var stripScrollSlack: Int { 20 }
+    nonisolated static var stripResidentCap: Int { 2 * stripRadius + 1 + stripScrollSlack }
 
     private static func filesByID(_ files: [SessionFile]) -> [String: SessionFile] {
         var byID: [String: SessionFile] = [:]
@@ -459,11 +507,10 @@ public final class ImageWindow {
                 }
             }
         },
-        upgradePolicy: { index, current in
+        isOutsideFullTier: { index, current in
             index < current - fullBehind || index > current + fullAhead
         })
     }
-
     /// Window extent kept resident for the main viewer (see `display`).
     /// The full-res tier (knobs above) sits inside this extent; the outer
     /// ring holds half-size placeholders.

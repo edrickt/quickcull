@@ -12,6 +12,10 @@ struct BadgedThumbnailView: View {
     let flagColor: FlagColor?
     let size: CGSize
     let badgeSize: CGFloat
+    /// Grid tiles fill their uniform cell (the spec asks for a tidy wall); the
+    /// filmstrip fits whole frames so nothing is cropped in the navigation
+    /// strip.
+    var fills: Bool = false
 
     var body: some View {
         Group {
@@ -21,7 +25,13 @@ struct BadgedThumbnailView: View {
                     .overlay {
                         Image(decorative: image, scale: 2)
                             .resizable()
-                            .scaledToFit()
+                            .aspectRatio(contentMode: fills ? .fill : .fit)
+                            // Pin the layout to the tile: a `.fill` image reports
+                            // the covering size (taller than the tile for a
+                            // portrait frame), and an overlay on that frame put
+                            // the badge outside the clipped tile — a flagged
+                            // portrait photo showed no badge at all.
+                            .frame(width: size.width, height: size.height)
                             .overlay(alignment: .topTrailing) {
                                 // `hasImage` is structurally true (we are inside
                                 // `if let image`); `isFlagged` is the real input.

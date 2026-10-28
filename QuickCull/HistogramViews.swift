@@ -64,7 +64,7 @@ struct RawHistogramView: View {
         }
         .background(.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 4))
-        .accessibilityLabel("RAW histogram")
+        .accessibilityLabel(histogram.isRendered ? "Rendered RGB histogram" : "RAW histogram")
     }
 }
 
@@ -84,6 +84,6 @@ struct RawLuminanceHistogramView: View {
         }
         .background(.black.opacity(0.3))
         .clipShape(RoundedRectangle(cornerRadius: 4))
-        .accessibilityLabel("Luminance histogram")
+        .accessibilityLabel(histogram.isRendered ? "Rendered luminance histogram" : "Luminance histogram")
     }
 }

@@ -31,4 +31,16 @@ public enum CullKeyMap {
                 .map { .toggleFlag($0) }
         }
     }
+
+    /// The letter a key prints, case-insensitively (`Z`, `z`, and Caps Lock all
+    /// match). This outranks `forKeyCode` on non-QWERTY layouts, where the key
+    /// labelled `Z` is not on the ANSI Z position: README tells the user to
+    /// press Z, so the key that says Z is the key that must flag red.
+    public static func action(forCharacter character: String) -> CullAction? {
+        guard character.count == 1 else { return nil }
+        let letter = character.lowercased()
+        return FlagColor.allCases
+            .first { $0.character == letter }
+            .map { .toggleFlag($0) }
+    }
 }

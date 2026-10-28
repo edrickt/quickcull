@@ -3,6 +3,10 @@ import QuickCullCore
 
 /// App-wide key handling via a local event monitor (no focus requirements:
 /// scrubbing must work the moment the window is up).
+///
+/// One instance for the whole app (`QuickCullApp` installs it once), so it is
+/// main-actor-only: monitors and `NSApp` state are main-thread APIs.
+@MainActor
 final class KeyboardMonitor {
     private var token: Any?
     private var loupeToken: Any?
@@ -29,6 +33,11 @@ final class KeyboardMonitor {
         loupeToken = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             guard event.keyCode == 49 else { return event }
             guard !Self.systemOwnsKeys else { return event }
+            // A chord involving Space belongs to the system (Cmd+Space, and
+            // Control+Space's input-source switch): the loupe is a bare key.
+            guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else {
+                return event
+            }
             if event.type == .keyDown, event.isARepeat { return nil }
             let isDown = event.type == .keyDown
             Task { @MainActor in appState.setLoupeActive(isDown) }
@@ -36,9 +45,11 @@ final class KeyboardMonitor {
         }
     }
 
-    /// A modal (the folder picker runs one) or a text field owns every key.
+    /// A modal, a sheet (the import panel is one), or a text field owns every
+    /// key.
     private static var systemOwnsKeys: Bool {
         if NSApp.modalWindow != nil { return true }
+        if NSApp.keyWindow?.isSheet == true { return true }
         return NSApp.keyWindow?.firstResponder is NSTextView
     }
 
@@ -46,21 +57,12 @@ final class KeyboardMonitor {
         let flags = event.modifierFlags
         return KeyRouter.outcome(
             keyCode: event.keyCode,
+            characters: event.charactersIgnoringModifiers,
             hasCommand: flags.contains(.command),
             hasControl: flags.contains(.control),
             hasOption: flags.contains(.option),
             hasModalWindow: NSApp.modalWindow != nil,
+            hasSheet: NSApp.keyWindow?.isSheet == true,
             isEditingText: NSApp.keyWindow?.firstResponder is NSTextView)
-    }
-
-    func stop() {
-        if let token {
-            NSEvent.removeMonitor(token)
-            self.token = nil
-        }
-        if let loupeToken {
-            NSEvent.removeMonitor(loupeToken)
-            self.loupeToken = nil
-        }
     }
 }

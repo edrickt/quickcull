@@ -17,12 +17,12 @@ struct EmptyStateView: View {
                 .foregroundStyle(.secondary)
             Text("QuickCull")
                 .font(.largeTitle.bold())
-            Text("Select raw files from any camera to start culling.")
+            Text("Select photos to start culling.")
                 .foregroundStyle(.secondary)
-            Button("Choose RAW Files…") { showImporter = true }
+            Button("Choose Files…") { showImporter = true }
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
-            Text("Canon · Nikon · Sony · Fujifilm · Olympus · Panasonic · Leica · Pentax · more")
+            Text("RAW · JPEG · PNG · HEIC — Canon, Nikon, Sony, Fujifilm, Olympus, Panasonic, Leica, Pentax and more")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }

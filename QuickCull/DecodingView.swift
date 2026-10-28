@@ -13,6 +13,9 @@ struct DecodingView: View {
                 Text("Decoding \(completed) of \(total)…")
                     .monospacedDigit()
             }
+            // A shoot's decode is minutes of work; without this the only exit
+            // from a long (or pathological) import is to quit the app.
+            Button("Cancel Import") { appState.cancelImport() }
         }
         .padding(40)
     }

@@ -51,4 +51,14 @@ final class DropdownClickPolicyTests: XCTestCase {
             click: CGPoint(x: panel.maxX, y: 150), panel: panel, toggle: toggle)
         XCTAssertNotEqual(policy, .ignore)
     }
+
+    /// `FrameAnchor` reports the panel frame from the AppKit layout pass, so a
+    /// click that arrives before it does gives an empty panel rect. Nothing may be
+    /// classified as "inside the panel" then, or the click would be swallowed
+    /// and the panel would stay open.
+    func testZeroSizePanelClassifiesNothingAsInside() {
+        let policy = DropdownClickPolicy.classify(
+            click: CGPoint(x: 200, y: 150), panel: .zero, toggle: toggle)
+        XCTAssertEqual(policy, .passThrough)
+    }
 }

@@ -7,16 +7,31 @@ import AppKit
 
 struct GridView: View {
     @Environment(AppState.self) private var appState
+    /// Files the lazy grid currently has on screen, reported to the window as a
+    /// set. Identity-keyed so a filter change or commit that renumbers the
+    /// projection cannot leave stale positions in the viewport. A reference box,
+    /// not `@State`: reporting it must not invalidate the body, which would
+    /// rebuild the whole element array on every cell that appears.
+    @State private var viewport = ViewportBox()
+
+    private final class ViewportBox {
+        private(set) var ids: Set<String> = []
+        /// True when the id was not already present (the caller reports only then).
+        @discardableResult
+        func insert(_ id: String) -> Bool { ids.insert(id).inserted }
+        @discardableResult
+        func remove(_ id: String) -> Bool { ids.remove(id) != nil }
+    }
 
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 8)]
 
     var body: some View {
         // Parent-body reads: avoid per-cell observation that makes LazyVGrid re-evaluate 500 cells on every gridSelection change.
         // Mirrors FilmstripView's stripKey/elements pattern for fast scrub.
-        // Grid uses its own all-thumbs window (no sliding window): gridThumbs can hold every
-        // thumbnail and never evicts on scroll, so scrolling the grid cannot unload a visible
-        // cell. It loads lazily through ensureLoaded below; the strip's thumbWindow is the
-        // bounded one (radius 30), and its cells ensureLoad too.
+        // The grid window is bounded by the viewport the cells report below
+        // (`setViewport`), not by a fixed count: a fixed cap smaller than the
+        // viewport evicted visible tiles, and a cell whose task had already run
+        // never requested its thumbnail again.
         let files = appState.session?.files ?? []
         let gridSelection = appState.gridSelection
         let flags = appState.session?.flags ?? [:]
@@ -42,7 +57,14 @@ struct GridView: View {
                             flagColor: element.flagColor,
                             image: element.image
                         )
-                        .task(id: element.index) { appState.gridThumbs?.ensureLoaded(indices: [element.index]) }
+                        .onAppear {
+                            guard viewport.insert(element.file.id) else { return }
+                            appState.gridThumbs?.setViewport(ids: viewport.ids)
+                        }
+                        .onDisappear {
+                            guard viewport.remove(element.file.id) else { return }
+                            appState.gridThumbs?.setViewport(ids: viewport.ids)
+                        }
                         .onTapGesture {
 #if canImport(AppKit)
                             let event = NSApp.currentEvent
@@ -59,8 +81,20 @@ struct GridView: View {
                             appState.handleGridTap(id: element.file.id, isCmd: false, isShift: false)
 #endif
                         }
+                        // A grid cell is a button: VoiceOver must be able to
+                        // select it (the only route to batch flagging) and to
+                        // open it in Single, neither of which a mouse-only tap
+                        // handler exposes.
+                        .accessibilityElement(children: .ignore)
                         .accessibilityLabel(element.file.url.lastPathComponent)
+                        .accessibilityAddTraits(.isButton)
                         .accessibilityAddTraits(element.isSelected ? .isSelected : [])
+                        .accessibilityAction {
+                            appState.handleGridTap(id: element.file.id, isCmd: false, isShift: false)
+                        }
+                        .accessibilityAction(named: "Open in Single") {
+                            appState.handleGridDoubleClick(id: element.file.id)
+                        }
                     }
                 }
                 .padding(12)
@@ -74,11 +108,14 @@ private struct GridCell: View {
     let index: Int; let file: SessionFile; let isSelected: Bool; let flagColor: FlagColor?; let image: CGImage?
     var body: some View {
         VStack(spacing: 4) {
+            // Fill the cell so a portrait frame does not leave a ragged column:
+            // every tile is the same 160x108 window onto its photo.
             BadgedThumbnailView(
                 image: image,
                 flagColor: flagColor,
                 size: CGSize(width: 160, height: 108),
-                badgeSize: 24
+                badgeSize: 24,
+                fills: true
             )
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2))
             Text(file.url.lastPathComponent)

@@ -349,4 +349,15 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(session.count, 2)
     }
 
+
+    /// `Session` is public and every lookup is id-keyed. A repeated URL must be
+    /// dropped rather than trap in a `Dictionary(uniqueKeysWithValues:)`.
+    func testDuplicateFileIdentitiesAreDropped() {
+        let a = SessionFile(url: URL(fileURLWithPath: "/tmp/shoot/a.cr2"))
+        let b = SessionFile(url: URL(fileURLWithPath: "/tmp/shoot/b.cr2"))
+        let session = Session(files: [a, a, b, b, b])
+        XCTAssertEqual(session.allFiles.map(\.id), [a.id, b.id])
+        XCTAssertEqual(session.files.map(\.id), [a.id, b.id])
+        XCTAssertTrue(session.contains(id: b.id))
+    }
 }

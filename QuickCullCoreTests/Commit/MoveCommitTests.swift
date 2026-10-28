@@ -77,4 +77,43 @@ final class MoveCommitTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["a.jpg"])
         XCTAssertEqual(try Data(contentsOf: source), Data("src".utf8))
     }
+
+    /// The same folder reached through a symlink is the same folder: spelling is
+    /// not identity. Comparing paths renamed every original in place, because the
+    /// collision suffix then found the file itself at the destination.
+    func testMoveIntoTheSourceFolderThroughASymlinkIsANoOp() throws {
+        let dir = try TestFixtures.makeTempDir(name: "move-symlink-target")
+        let linkParent = try TestFixtures.makeTempDir(name: "move-symlink-parent")
+        defer { try? FileManager.default.removeItem(at: dir)
+                try? FileManager.default.removeItem(at: linkParent) }
+        let link = linkParent.appendingPathComponent("alias", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: dir)
+        let source = dir.appendingPathComponent("a.jpg")
+        try Data("src".utf8).write(to: source)
+
+        let outcomes = MoveCommit(mover: FileManagerMover())
+            .commit(files: [SessionFile(url: source)], to: link)
+
+        XCTAssertTrue(outcomes[0].succeeded)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["a.jpg"],
+                       "no in-place rename through the alias")
+        XCTAssertEqual(try Data(contentsOf: source), Data("src".utf8))
+    }
+
+    /// A destination spelled `..`-relative or with a trailing slash is still the
+    /// same directory (the picker can return either shape).
+    func testMoveIntoTheSourceFolderWithAnotherSpellingIsANoOp() throws {
+        let parent = try TestFixtures.makeTempDir(name: "move-spelling")
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let dir = parent.appendingPathComponent("shoot", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let source = dir.appendingPathComponent("a.jpg")
+        try Data("src".utf8).write(to: source)
+
+        let dotted = dir.appendingPathComponent("../shoot")
+        let outcomes = MoveCommit(mover: FileManagerMover())
+            .commit(files: [SessionFile(url: source)], to: dotted)
+        XCTAssertTrue(outcomes[0].succeeded)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["a.jpg"])
+    }
 }

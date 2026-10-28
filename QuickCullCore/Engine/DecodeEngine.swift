@@ -110,19 +110,28 @@ public actor DecodeEngine {
                             while let file = await queue.dequeue() {
                                 if Task.isCancelled { break }
                                 let signpostID = OSSignpostID(log: OSLog.decode)
-                                os_signpost(.begin, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}s", file.id)
+                                os_signpost(.begin, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}@", file.id)
                                 let t0 = CFAbsoluteTimeGetCurrent()
                                 let (outcome, benchWidth, benchHeight) = await self.decodeOne(file)
                                 let totalMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
                                 self.benchmarkAccum.append(Benchmark(fileID: file.id, totalMs: totalMs, width: benchWidth, height: benchHeight))
-                                os_signpost(.end, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}s totalMs=%{public}f", file.id, totalMs)
+                                os_signpost(.end, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}@ totalMs=%{public}f", file.id, totalMs)
                                 outcomes.append(outcome)
                                 await reporter.reportProgress()
                             }
                         }
                     }
                 }
-                continuation.yield(.completed(outcomes.snapshot()))
+                // Outcomes are collected in completion order; hand them back in
+                // the import's own order so the failure banner names the same
+                // files in the same order on every run of the same import.
+                var inputOrder: [String: Int] = [:]
+                inputOrder.reserveCapacity(files.count)
+                for (index, file) in files.enumerated() { inputOrder[file.id] = index }
+                let ordered = outcomes.snapshot().sorted {
+                    (inputOrder[$0.file.id] ?? 0) < (inputOrder[$1.file.id] ?? 0)
+                }
+                continuation.yield(.completed(ordered))
                 continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -151,17 +160,18 @@ public actor DecodeEngine {
             return (DecodeOutcome(file: file, error: decoded.error ?? .invalidOutput), 0, 0)
         }
         do {
-            try await cache.storeJPEG(bitmap, for: file, quality: options.jpegQuality)
+            let jpegURL = try await cache.storeJPEG(bitmap, for: file, quality: options.jpegQuality)
+            // Histogram sidecar is best-effort: its failure must never fail the
+            // import, and it is written beside the JPEG whose key it shares.
+            if let hist = bitmap.histogram {
+                try? await cache.storeHistogram(hist, beside: jpegURL)
+            }
         } catch {
             // The cache is a separate boundary: a write failure is not a decode
             // failure, and saying so is what lets a user free up disk instead
             // of believing the photo is broken.
             return (DecodeOutcome(file: file, error: .cannotStorePreview("\(error)")),
                     bitmap.width, bitmap.height)
-        }
-        // Histogram sidecar is best-effort: its failure must never fail the import.
-        if let hist = bitmap.histogram {
-            try? await cache.storeHistogram(hist, for: file)
         }
         return (DecodeOutcome(file: file, error: nil), bitmap.width, bitmap.height)
     }

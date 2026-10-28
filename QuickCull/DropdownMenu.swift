@@ -53,9 +53,21 @@ struct DropdownMenu<Label: View>: View {
     @State private var monitor: Any?
     @State private var resignObserver: NSObjectProtocol?
     @State private var hoveredItemID: String?
+    /// The window the panel was opened in. The mouse monitor sees every app
+    /// window's clicks, but the panel and toggle rects were measured in this
+    /// one: converting them through another window's origin misclassified the
+    /// click (swallowing a press there and leaving this panel open).
+    @State private var hostWindowBox = WindowBox()
+    /// Rendered panel width, shared by the frame and the edge clamp so they
+    /// cannot drift apart.
+    private var panelWidth: CGFloat { DropdownMetrics.panelWidth }
 
     private final class FrameBox {
         var frame: CGRect = .zero
+    }
+
+    private final class WindowBox {
+        weak var window: NSWindow?
     }
 
     init(items: [Item], @ViewBuilder label: () -> Label) {
@@ -100,7 +112,7 @@ struct DropdownMenu<Label: View>: View {
     /// whatever window is underneath on screen).
     private var panelXOffset: CGFloat {
         guard windowWidth > 0 else { return 0 }
-        let maxLeading = max(0, windowWidth - 240 - 8)
+        let maxLeading = max(0, windowWidth - panelWidth - 8)
         return min(toggleFrame.minX, maxLeading) - toggleFrame.minX
     }
 
@@ -141,7 +153,7 @@ struct DropdownMenu<Label: View>: View {
             }
         }
         .padding(.vertical, 4)
-        .frame(width: 240, alignment: .leading)
+        .frame(width: panelWidth, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.12)))
         .shadow(color: .black.opacity(0.25), radius: 12, y: 5)
@@ -149,6 +161,7 @@ struct DropdownMenu<Label: View>: View {
 
     private func open() {
         guard !isOpen else { return }
+        hostWindowBox.window = NSApp.keyWindow
         isOpen = true
         installMonitor()
     }
@@ -156,6 +169,9 @@ struct DropdownMenu<Label: View>: View {
     private func close() {
         guard isOpen else { return }
         isOpen = false
+        // A reopened panel must not inherit the last hover highlight: a removed
+        // row never delivers its hover-exit callback.
+        hoveredItemID = nil
         removeMonitorAsync()
     }
 
@@ -179,6 +195,12 @@ struct DropdownMenu<Label: View>: View {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
             guard self.isOpen, let window = event.window else { return event }
+            guard window === self.hostWindowBox.window else {
+                // Another window's click: a native menu would close, and the
+                // press must still land where the user aimed it.
+                self.close()
+                return event
+            }
             let click = window.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero)).origin
             let panel = window.convertToScreen(self.panelFrameBox.frame)
             let toggle = window.convertToScreen(self.toggleFrame)
@@ -204,6 +226,12 @@ struct DropdownMenu<Label: View>: View {
             self.close()
         }
     }
+}
+
+/// Layout constants for `DropdownMenu` (a generic type cannot hold static
+/// stored properties).
+enum DropdownMetrics {
+    static let panelWidth: CGFloat = 240
 }
 
 /// Invisible AppKit view that reports its window-coordinate frame (and the

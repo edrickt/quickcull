@@ -96,7 +96,10 @@ public actor ImageCacheStore {
                                assuming generation: Int) async throws -> URL {
         try await ensureBaseDirExists()
         let destination = try cacheURL(for: file)
-        let tmp = destination.appendingPathExtension("tmp")
+        // Unique per write: two stores of the same identity (a re-import racing a
+        // post-cancel store from the previous import) would otherwise share one
+        // temp path, truncate each other's encode, and fail the loser with ENOENT.
+        let tmp = destination.appendingPathExtension("tmp-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         guard let sink = CGImageDestinationCreateWithURL(
@@ -112,12 +115,24 @@ public actor ImageCacheStore {
         guard await isCurrentGeneration(generation) else {
             throw CacheError.staleGeneration
         }
-        if FileManager.default.fileExists(atPath: destination.path) {
-            _ = try FileManager.default.replaceItemAt(destination, withItemAt: tmp)
-        } else {
-            try FileManager.default.moveItem(at: tmp, to: destination)
-        }
+        try Self.moveIntoPlace(tmp: tmp, destination: destination)
         return destination
+    }
+
+    /// Publishes a fully written temp file at its cache location.
+    ///
+    /// Two stores of the same identity can race (a re-import overlapping a
+    /// post-cancel store from the previous import), and both can see no
+    /// destination before either moves: the loser's `moveItem` then fails with
+    /// "item with the same name already exists". Replacing is the same outcome —
+    /// both writes carry this key — so the loser falls back to it.
+    private static func moveIntoPlace(tmp: URL, destination: URL) throws {
+        do {
+            try FileManager.default.moveItem(at: tmp, to: destination)
+        } catch {
+            guard FileManager.default.fileExists(atPath: destination.path) else { throw error }
+            _ = try? FileManager.default.replaceItemAt(destination, withItemAt: tmp)
+        }
     }
 
     @discardableResult
@@ -139,19 +154,29 @@ public actor ImageCacheStore {
         jpegURL.appendingPathExtension("hist").appendingPathExtension("json")
     }
 
-    /// Store the raw histogram as an atomic JSON sidecar next to the JPEG.
-    public func storeHistogram(_ hist: RawHistogram, for file: SessionFile) throws {
-        try ensureBaseDir()
-        let destination = try histogramURL(for: file)
-        let tmp = destination.appendingPathExtension("tmp")
+    /// Store the raw histogram as an atomic JSON sidecar next to the JPEG it
+    /// describes. Takes the JPEG's URL rather than re-deriving the key: the key
+    /// embeds the source's size and mtime, and a key computed at a later instant
+    /// could split a sidecar from its JPEG (leaving the HUD on the rendered
+    /// fallback for no reason).
+    public nonisolated func storeHistogram(_ hist: RawHistogram, beside jpegURL: URL) async throws {
+        let generation = await currentStoreGeneration()
+        try await storeHistogram(hist, beside: jpegURL, assuming: generation)
+    }
+
+    /// `assuming` is the cache generation the caller saw (see `storeJPEG`): a
+    /// sidecar whose session was wiped mid-write must not land in the fresh
+    /// cache, which would leave an orphan `.hist.json` behind the wipe.
+    nonisolated func storeHistogram(_ hist: RawHistogram, beside jpegURL: URL,
+                                    assuming generation: Int) async throws {
+        try await ensureBaseDirExists()
+        guard await isCurrentGeneration(generation) else { throw CacheError.staleGeneration }
+        let destination = Self.histogramURL(beside: jpegURL)
+        let tmp = destination.appendingPathExtension("tmp-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
         let data = try JSONEncoder().encode(hist)
         try data.write(to: tmp)
-        if FileManager.default.fileExists(atPath: destination.path) {
-            _ = try FileManager.default.replaceItemAt(destination, withItemAt: tmp)
-        } else {
-            try FileManager.default.moveItem(at: tmp, to: destination)
-        }
+        try Self.moveIntoPlace(tmp: tmp, destination: destination)
     }
 
     /// Load the raw histogram sidecar; nil when missing or corrupt.

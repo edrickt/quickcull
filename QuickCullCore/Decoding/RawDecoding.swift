@@ -20,7 +20,9 @@ public struct RawBitmap {
     /// LibRaw flip value (0-7). Informational only: the pixel buffer is
     /// already upright (dcraw_process applied the flip).
     public let flip: Int
-    /// Rendered sRGB histogram (nil only if decode failed).
+    /// Linear pre-white-balance Bayer counts (see `RawHistogram`), or nil when
+    /// the sensor has no Bayer CFA (X-Trans, Fovea, monochrome) — a successful
+    /// decode can therefore legitimately carry no histogram.
     public let histogram: RawHistogram?
 
     public init(image: CGImage, width: Int, height: Int, flip: Int, histogram: RawHistogram? = nil) {

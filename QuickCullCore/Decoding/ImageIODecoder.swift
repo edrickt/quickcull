@@ -54,7 +54,7 @@ public struct RoutingDecoder: RawDecoding {
         switch RawFileIdentity.decoderKind(for: url) {
         case .libraw: return try librawDecoder.decodeRaw(at: url, options: options)
         case .imageIO: return try imageIODecoder.decodeRaw(at: url, options: options)
-        case nil: throw DecodeError.cannotOpen("Unsupported format")
+        case nil: throw DecodeError.cannotOpen(ImportFailureSummary.unsupportedMessage)
         }
     }
 }

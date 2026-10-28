@@ -12,6 +12,11 @@ public struct RawHistogram: Codable, Equatable, Sendable {
     public let luminance: [Int]
     /// 255 for rendered histograms; legacy linear sidecars stored sensor maximum (e.g. 16383).
     public let sensorMax: Int
+    /// True when these are rendered-sRGB counts (X-Trans/Fovea raws and the
+    /// ImageIO fallback) rather than linear sensor counts. `sensorMax` is the
+    /// discriminator: the raw path records the sensor's own maximum, the
+    /// rendered path 255.
+    public var isRendered: Bool { sensorMax == 255 }
     /// Total samples per entry (R, G, B, luminance).
     public var samples: [Int] { (bins + [luminance]).map { $0.reduce(0, +) } }
     /// Fraction of samples at the top bin per entry (0...1): clipped samples

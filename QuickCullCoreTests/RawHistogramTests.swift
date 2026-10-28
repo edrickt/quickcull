@@ -145,4 +145,34 @@ final class RawHistogramTests: XCTestCase {
         let expectedBin = 200 * (RawHistogram.binCount - 1) / 255
         XCTAssertEqual(h.luminance[expectedBin], sampled, "flat image keeps one populated bin")
     }
+
+    /// Every other display-histogram test uses a grey image, where a red/blue
+    /// swap (or swapped Rec.709 coefficients) is invisible. A pure-red image
+    /// lands entirely in channel 0 and in luminance's dark end.
+    func testDisplayHistogramKeepsRedInTheRedChannel() throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 64,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        let red = try XCTUnwrap(context.makeImage())
+
+        let h = DisplayHistogram.compute(from: red)
+        XCTAssertEqual(h.bins[0][255], 256, "all red pixels in the top red bin")
+        XCTAssertEqual(h.bins[2][0], 256, "blue channel is at zero")
+        XCTAssertEqual(h.samples[1], 256)
+        XCTAssertLessThan(h.bins[1].last ?? 0, 256, "green is not saturated by a red image")
+        // Rec.709 Y for pure red is ~54/255 (81 here after the DeviceRGB
+        // conversion); a swapped coefficient set would peak near green's 182.
+        let lumaPeak = h.luminance.firstIndex(of: h.luminance.max()!)!
+        XCTAssertLessThan(lumaPeak, 100, "luminance of pure red must sit in the dark end")
+        XCTAssertTrue(h.isRendered)
+    }
+
+    func testLinearHistogramIsNotLabelledRendered() {
+        XCTAssertFalse(TestFixtures.makeFullHistogram(sensorMax: 16383).isRendered)
+        XCTAssertFalse(TestFixtures.makeFullHistogram(sensorMax: 4095).isRendered)
+        XCTAssertTrue(TestFixtures.makeFullHistogram(sensorMax: 255).isRendered)
+    }
 }

@@ -8,8 +8,8 @@ Download the latest release from [Releases](https://github.com/edrickt/quickcull
 
 - **True RAW histogram, not a preview.** FastRawViewer-style linear counts taken before white balance and gamma. Each Bayer photosite counts once by color, so R is about 1/4 of pixels, G about 1/2, B about 1/4. Sensor maximum is recorded per camera (for example 4095 on CR2/NEF, 16383 on CR3). You see clipping percent, mean, and overall luminance in two 72pt log-y panels. X-Trans and Fuji super-CCD fall back to a rendered 255 histogram (computed from a 1024px sample, not the full-resolution bitmap).
 - **Decode first, scrub without waiting.** LibRaw demosaics every RAW at full resolution, ImageIO handles JPEG, PNG and HEIC, everything lands as a q75 JPEG in the local cache. The app finishes decoding before you can scrub, so the arrow keys never stall on a decode.
-- **Memory stays flat.** The viewer decodes the current image plus −5/+10 at full resolution — so the Space loupe is true source-pixel 1:1 at any image size and scrubbing within the tier is instant — while the rest of the −10/+20 window pre-loads at half size (DCT-subsampled, ~4× less memory) and upgrades to full-res the moment you land on it. Both the viewer window and the thumbnails are bounded by a fixed viewport, never by shoot size: the strip keeps at most 61 × 320px thumbnails, and the grid keeps at most 61 as well, the most recent cells you scrolled to. Where the loupe lands on a half-size placeholder it says `preview` instead of claiming 100%. Thumbnail and display decodes are throttled, and a superseded decode is cancelled, so a fast scrub or a grid fill can never fire hundreds at once. 16 full-res + 15 half-size 20MP images ≈ 1.2GB (fits 8GB machines for typical shoots; ~2.3GB at 45MP), tunable with `defaults write com.quickcull.app displayFullResBehind N` and `defaults write com.quickcull.app displayFullResAhead N` (clamped to the window extent).
-- **Three ways to look.** Single shows one image fit to window. Split shows current and next side by side with an 8pt gap and no divider, and both panes share the same zoom and pan. Grid shows adaptive 160 to 200pt thumbnails, selection by file id so it survives filters, and batch flag with Z/X/C.
+- **Memory stays flat.** The viewer decodes the current image plus −5/+10 at full resolution — so the Space loupe is true source-pixel 1:1 at any image size and scrubbing within the tier is instant — while the rest of the −10/+20 window pre-loads at half size (DCT-subsampled, ~4× less memory) and upgrades to full-res the moment you land on it. Both the viewer window and the thumbnails are bounded by the surface that shows them, never by shoot size: the strip pre-loads the current ±30 and keeps at most 81 × 320px thumbnails (61 in the pre-load window plus the 20 cells you scrolled to), and the grid keeps exactly the tiles in view. Where the loupe lands on a half-size placeholder it says `preview` instead of claiming 100%. Thumbnail and display decodes are throttled, and a superseded decode is cancelled, so a fast scrub or a grid fill can never fire hundreds at once. 16 full-res + 15 half-size 20MP images ≈ 1.2GB when the window is fresh, rising to ≈1.7GB once you have scrubbed across it (a visited image stays full-res; ~3.6GB at 45MP), tunable with `defaults write com.quickcull.app displayFullResBehind N` and `defaults write com.quickcull.app displayFullResAhead N` (clamped to the window extent).
+- **Three ways to look.** Single shows one image fit to window. Split shows current and next side by side with an 8pt gap and no divider, and both panes share the same zoom and pan. Grid shows a wall of uniform 160pt cells, selection by file id so it survives filters, and batch flag with Z/X/C (with nothing selected, a flag key does nothing).
 - **Metadata where you need it.** A 240pt sidebar slides in without covering the image. It shows file name and path, dimensions, file size, camera and lens, ISO, aperture, shutter, focal length, date taken, exposure bias and white balance, plus the histogram above the rows.
 - **Titles under every thumb.** Each filmstrip and grid thumbnail shows the file name, single line, tail truncated, with the full name in a tooltip.
 - **Three colors, not one flag.** `Z` is red, `X` is yellow, `C` is green. Each photo holds at most one color; hit the same key to clear it, hit a different key to replace it. The badge is a corner triangle tinted to match. Filter to All, R, Y, G, or Unflagged with live counts. Trash and Move are dropdown menus with per-color choices (R, Y, G, All Flagged) that disable when that color has nothing flagged or while a commit is running. Move picks a folder each time with a system picker, moves flat, and auto-renames to `name 1.ext` when the destination exists. Grid batch works too: select a few thumbs and `Z` turns them all red at once.
@@ -64,16 +64,18 @@ Standard formats decoded with ImageIO: JPEG (JPG, JPEG), PNG, HEIC and HEIF. Ori
 | `C` | Toggle green flag; replaces red or yellow if one is set |
 | `Space` (hold) | 100% loupe at fit: a 280pt lens of true 1:1 source pixels that follows the cursor |
 
-Flags are exclusive: a photo can be red, yellow, green, or unflagged, never two at once. In grid, with a selection, `Z`/`X`/`C` apply to every selected id and the selection clears after.
+Flags are exclusive: a photo can be red, yellow, green, or unflagged, never two at once. In grid, with a selection, `Z`/`X`/`C` apply to every selected id and the selection clears after; with no selection they do nothing, because grid marks no current photo.
 
-Filter bar has five segments: `All | R (n) | Y (n) | G (n) | Unflagged (n)` with live counts. When a filter matches nothing you get an empty placeholder, not a fallback. Toggling a flag under a non-All filter drops that photo out of view; if the filter empties it falls back to All.
+Flag keys follow the letter the key prints, so `Z`/`X`/`C` work on AZERTY and Dvorak too.
+
+Filter bar has five segments: `All`, a red dot, a yellow dot, a green dot, and a flag glyph for unflagged. The segments combine — `R` + `Y` shows both colours — and tapping an active segment removes it; deselecting the last one returns to All. The live counts sit in each segment's accessibility label and in both dropdown menus. When a filter matches nothing you get an empty placeholder, not a fallback. Toggling a flag under a non-All filter drops that photo out of view; if the filter empties it falls back to All.
 
 Commit controls are two dropdowns:
 
 - **Move Flagged to Trash** → `Trash R (n)`, `Trash Y (n)`, `Trash G (n)`, `Trash All Flagged (n)`. Each runs a per-file trash to macOS Trash and reports failures. Failed files keep their color.
 - **Move Flagged** → `Move R (n)`, `Move Y (n)`, `Move G (n)`, `Move All Flagged (n)`. Opens a folder picker (you can create a folder there), then moves flat with auto-rename on collision. Same per-file success handling as Trash.
 
-Both menus disable their items when that bucket is empty and disable entirely while a move or trash is in flight. View, filter, and flag input block during that time too.
+Both menus disable their items when that bucket is empty and disable entirely while a move or trash is in flight, and everywhere while its confirmation dialog is up. View, filter, and flag input block during that time too.
 
 Click a filmstrip thumbnail to jump to that photo. In grid, click to select, Cmd-click to toggle, Shift-click for a range, double-click to jump to single and show that photo.
 
@@ -88,7 +90,7 @@ To keep a copy in Applications, use [Install](#install) instead.
 
 ## Cache
 
-Decoded photos are full-resolution q75 JPEGs in `~/Library/Application Support/QuickCull/cache`, keyed by file path, size and modification time. The cache is wiped on launch and best-effort on quit, so each session decodes from the originals.
+Decoded photos are full-resolution q75 JPEGs in `~/Library/Application Support/QuickCull/cache`, keyed by file path, size and modification time. The cache is wiped on launch and on quit (a forced quit is covered by the next launch), so each session decodes from the originals.
 
 ## Build
 
@@ -107,7 +109,7 @@ Build the test bundle, then run it directly with `xcrun xctest`:
 
     xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 
-227 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
+262 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
 
 ### Fixtures
 

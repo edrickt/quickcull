@@ -9,26 +9,10 @@ final class FlagBadgeLogicTests: XCTestCase {
         XCTAssertFalse(FlagBadgeLogic.shouldShow(isFlagged: false, hasImage: false))
     }
 
-    func testGridCellRequiresImage() {
-        // GridCell uses BadgedThumbnailView which delegates to FlagBadgeLogic.
-        // A flagged file without a loaded thumbnail must not badge.
-        let isFlagged = true
-        let hasImage = false
-        XCTAssertFalse(FlagBadgeLogic.shouldShow(isFlagged: isFlagged, hasImage: hasImage),
-                       "Grid badge belongs to image, not 160x108 placeholder (grid view regression)")
-    }
-
-    func testFilmstripCanvasRequiresImage() {
-        // Filmstrip Canvas must skip flagged cells whose image hasn't loaded.
-        let isFlagged = true
-        let hasImage = false
-        XCTAssertFalse(FlagBadgeLogic.shouldShow(isFlagged: isFlagged, hasImage: hasImage),
-                       "Strip badge must wait for photo (9b9dc4a regression)")
-    }
-
-    func testViewerFallbackRequiresImage() {
-        // Viewer flag overlay sits on Image branch only; ProgressView branch has no image.
-        XCTAssertTrue(FlagBadgeLogic.shouldShow(isFlagged: true, hasImage: true))
-        XCTAssertFalse(FlagBadgeLogic.shouldShow(isFlagged: true, hasImage: false))
-    }
+    // The three tests that used to live here restated `shouldShow(isFlagged:
+    // true, hasImage: false)` with local constants and claimed to cover the
+    // grid/filmstrip/viewer call sites; none of them called a view, and deleting
+    // `FlagBadgeLogic` would have left them green. The rule is single: a badge
+    // shows only on a loaded image, which `BadgedThumbnailView` enforces
+    // structurally (`hasImage` is true inside `if let image`).
 }

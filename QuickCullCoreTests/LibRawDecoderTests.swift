@@ -99,6 +99,22 @@ final class LibRawDecoderTests: XCTestCase {
         XCTAssertNil(fuji.histogram, "super-CCD/X-Trans has no Bayer raw histogram — UI falls back to DisplayHistogram")
     }
 
+    /// The sensor maximum is per camera, and the histogram normalizes by it. A
+    /// silent fallback to 16383 on a 12-bit body crams the whole tonal range
+    /// into the bottom quarter and reports 0% clipping on blown highlights — and
+    /// the old assertion (`> 255`) could not see that.
+    func testSensorMaxIsTheCamerasOwnBitDepth() throws {
+        let twelveBit: [(name: String, ext: String)] = [("img_0062", "cr2"), ("dsc8140", "nef")]
+        for c in twelveBit {
+            let bitmap = try decoder.decodeRaw(at: fixture(c.name, c.ext))
+            let hist = try XCTUnwrap(bitmap.histogram, c.name)
+            XCTAssertEqual(hist.sensorMax, 4095, "\(c.name) is a 12-bit sensor")
+        }
+        let fourteenBit = try decoder.decodeRaw(at: fixture("mg_2233", "cr3"))
+        let hist = try XCTUnwrap(fourteenBit.histogram, "mg_2233")
+        XCTAssertEqual(hist.sensorMax, 16383, "mg_2233 is a 14-bit sensor")
+    }
+
     func testLuminanceComputedForBayerFixtures() throws {
         let cases: [(name: String, ext: String)] = [("img_0062","cr2"),("dsc8140","nef"),("p1000336","rw2")]
         for c in cases {
@@ -128,7 +144,7 @@ final class LibRawDecoderTests: XCTestCase {
         XCTAssertEqual(fallback.luminance.count, RawHistogram.binCount)
     }
 
-    func testLibRawDecoderProducesIdenticalPixelsWithZeroCopy() throws {
+    func testLibRawDecoderProducesIdenticalPixelsAcrossDecodes() throws {
         // Use a real fixture via LibRawDecoder; decode twice and compare pixel hashes
         let bundleURL = try XCTUnwrap(Bundle(for: Self.self).resourceURL)
         let canonURL = bundleURL.appendingPathComponent("Fixtures/raws/canon_eos6d.cr2")

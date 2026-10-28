@@ -47,12 +47,13 @@ struct ZoomableImageView: View {
                     .scaleEffect(scale)
                     .offset(renderOffset)
                 if let c = flagColor {
-                    Color.clear
-                        .frame(width: fitted.width * scale, height: fitted.height * scale)
-                        .overlay(alignment: .topTrailing) {
-                            FlagBadge(color: c, size: 44)
-                        }
-                        .offset(renderOffset)
+                    // Pinned to the pane's corner, not to the scaled image frame:
+                    // at 2x the image's own corner is outside the clipped
+                    // viewport, so the flag indicator vanished exactly while the
+                    // user was inspecting detail.
+                    FlagBadge(color: c, size: 28)
+                        .padding(6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                         .allowsHitTesting(false)
                 }
 

@@ -108,4 +108,33 @@ final class ImageMetadataProviderTests: XCTestCase {
         XCTAssertEqual(meta.iso, "ISO 400")
         XCTAssertEqual(meta.aperture, "f/2.8")
     }
+
+    /// Most makers repeat themselves in the model tag and PENTAX pads both with
+    /// spaces: joining the two produced "Canon Canon EOS 30D" and
+    /// "PENTAX              PENTAX K-01".
+    func testCameraNameDoesNotRepeatTheMakeOrKeepPadding() {
+        XCTAssertEqual(ImageMetadataProvider.cameraName(make: "Canon", model: "Canon EOS 30D"),
+                       "Canon EOS 30D")
+        XCTAssertEqual(ImageMetadataProvider.cameraName(make: "PENTAX              ",
+                                                       model: "PENTAX K-01        "),
+                       "PENTAX K-01")
+        XCTAssertEqual(ImageMetadataProvider.cameraName(make: "NIKON CORPORATION", model: "NIKON 1 J1"),
+                       "NIKON CORPORATION NIKON 1 J1", "a model that only shares a prefix keeps both")
+        XCTAssertEqual(ImageMetadataProvider.cameraName(make: nil, model: "X100V"), "X100V")
+        XCTAssertEqual(ImageMetadataProvider.cameraName(make: "Leica", model: nil), "Leica")
+        XCTAssertNil(ImageMetadataProvider.cameraName(make: nil, model: nil))
+    }
+
+    /// The HUD's camera/lens/ISO rows for a raw come from ImageIO reading the
+    /// file itself; every other test here writes a JPEG, so a regression that
+    /// blanked the whole raw path passed the suite.
+    func testRawFixtureExposesCameraAndExposure() throws {
+        let url = try XCTUnwrap(Bundle(for: Self.self)
+            .url(forResource: "img_0062", withExtension: "cr2", subdirectory: "Fixtures/raws"))
+        let meta = ImageMetadataProvider.metadata(for: SessionFile(url: url), cgImage: nil)
+        XCTAssertEqual(meta.camera, "Canon EOS 30D", "make is not repeated")
+        XCTAssertEqual(meta.iso, "ISO 100")
+        XCTAssertEqual(meta.aperture, "f/8.0")
+        XCTAssertEqual(meta.dimensions, "3504×2336")
+    }
 }

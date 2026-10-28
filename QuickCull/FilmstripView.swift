@@ -72,6 +72,18 @@ struct FilmstripView: View {
             }
             .frame(height: 102) // was 86; adds room for caption (64 thumb + 3 spacing + ~13 caption + 12 padding)
             .background(.thinMaterial)
+            // Re-entering Single from Grid rebuilds the strip, which would
+            // otherwise open at the leading edge with the highlighted cell
+            // off-screen. `.task` runs after the first layout, when the lazy
+            // cells can be scrolled to.
+            .task {
+                guard let session = appState.session,
+                      session.files.indices.contains(session.currentIndex) else { return }
+                let key = stripKey(session.files[session.currentIndex],
+                                   flagRevision: session.flagRevision,
+                                   currentIndex: session.currentIndex)
+                proxy.scrollTo(key, anchor: .center)
+            }
             .onChange(of: appState.session?.currentIndex) {
                 // scrollTo must target the ForEach's identity (the strip
                 // key), not the integer index: cells are keyed by file id so
@@ -130,5 +142,10 @@ struct ThumbnailCell: View {
         .contentShape(Rectangle())
         .onTapGesture { appState.setCurrentIndex(index) }
         .help(file.url.lastPathComponent) // tooltip when hovering thumb as well
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(file.url.lastPathComponent)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        .accessibilityAction { appState.setCurrentIndex(index) }
     }
 }

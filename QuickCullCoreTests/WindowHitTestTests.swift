@@ -76,4 +76,35 @@ final class WindowHitTestTests: XCTestCase {
                                               windowFrame: windowFrame,
                                               paneGlobalFrame: paneGlobalFrame))
     }
+
+    /// A display arranged left of or below the main one has a negative-origin
+    /// window frame; the y flip must still be measured from its own top edge.
+    func testNegativeOriginWindowFrameMapsFromItsOwnTopEdge() {
+        let frame = CGRect(x: -800, y: -600, width: 600, height: 432)
+        let point = WindowHitTest.globalPoint(fromScreen: CGPoint(x: -800, y: -600),
+                                             windowFrame: frame)
+        XCTAssertEqual(point, CGPoint(x: 0, y: 432))
+    }
+
+    /// Before the first layout pass the pane reports a zero frame; no screen
+    /// point may be treated as inside it.
+    func testZeroSizePaneIsNeverAHit() {
+        XCTAssertFalse(WindowHitTest.contains(screenPoint: CGPoint(x: 700, y: 400),
+                                              windowFrame: windowFrame,
+                                              paneGlobalFrame: .zero))
+    }
+
+    /// Split mode puts an 8pt gap between the panes; a point in it belongs to
+    /// neither, so neither pane's scroll monitor may claim the event.
+    func testSplitPaneGapBelongsToNeitherPane() {
+        let left = CGRect(x: 50, y: 60, width: 400, height: 300)
+        let right = CGRect(x: 458, y: 60, width: 400, height: 300)
+        let gapX = left.maxX + 4
+        // Screen y for window y = 210: 200 + 432 - 210 = 422.
+        let screenPoint = CGPoint(x: 400 + gapX, y: 422)
+        XCTAssertFalse(WindowHitTest.contains(screenPoint: screenPoint,
+                                              windowFrame: windowFrame, paneGlobalFrame: left))
+        XCTAssertFalse(WindowHitTest.contains(screenPoint: screenPoint,
+                                              windowFrame: windowFrame, paneGlobalFrame: right))
+    }
 }

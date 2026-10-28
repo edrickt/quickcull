@@ -128,7 +128,11 @@ struct ScrubView: View {
 
     /// `File ▸ New Session` is withheld while a commit or move is in flight.
     private var newSessionAction: (() -> Void)? {
-        guard !appState.isCommitting, !appState.isMoving else { return nil }
+        // The pending counts are part of the guard as well: presenting another
+        // alert dismisses the Trash/Move one without running either button, and
+        // its app-wide slot would stay taken with no dialog left to clear it.
+        guard !appState.isCommitting, !appState.isMoving,
+              appState.pendingCommitCount == 0, appState.pendingMoveCount == 0 else { return nil }
         return { showNewSessionConfirm = true }
     }
 
@@ -318,6 +322,9 @@ struct ScrubView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibility)
+        // A coloured dot is the selected state to the eye; VoiceOver needs it
+        // stated.
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// Multi-select toggle: tapping a component adds/removes it from the
@@ -372,27 +379,31 @@ struct ScrubView: View {
     @ViewBuilder
     private var actionButtons: some View {
         let counts = flagCounts
+        // A pending dialog in any window disables the menus everywhere: the
+        // request slot is app-wide, and a second request would swap the set
+        // the open dialog already named.
         let busy = appState.isCommitting || appState.isMoving
+            || appState.pendingCommitCount > 0 || appState.pendingMoveCount > 0
         DropdownMenu(items: [
             .init("Trash R (\(counts.red))", destructive: true,
                   disabled: counts.red == 0 || busy,
                   icon: "circle.fill", iconColor: .red) {
-                appState.requestCommit(color: .red); showCommitConfirm = true
+                if appState.requestCommit(color: .red) { showCommitConfirm = true }
             },
             .init("Trash Y (\(counts.yellow))", destructive: true,
                   disabled: counts.yellow == 0 || busy,
                   icon: "circle.fill", iconColor: .yellow) {
-                appState.requestCommit(color: .yellow); showCommitConfirm = true
+                if appState.requestCommit(color: .yellow) { showCommitConfirm = true }
             },
             .init("Trash G (\(counts.green))", destructive: true,
                   disabled: counts.green == 0 || busy,
                   icon: "circle.fill", iconColor: .green) {
-                appState.requestCommit(color: .green); showCommitConfirm = true
+                if appState.requestCommit(color: .green) { showCommitConfirm = true }
             },
             .init("Trash All Flagged (\(counts.all))", destructive: true,
                   disabled: counts.all == 0 || busy,
                   icon: "circle.fill") {
-                appState.requestCommit(color: nil); showCommitConfirm = true
+                if appState.requestCommit(color: nil) { showCommitConfirm = true }
             },
         ]) {
             Group {
@@ -411,28 +422,28 @@ struct ScrubView: View {
                   disabled: counts.red == 0 || busy,
                   icon: "circle.fill", iconColor: .red) {
                 if let dest = chooseMoveDestination() {
-                    appState.requestMove(to: dest, color: .red); showMoveConfirm = true
+                    if appState.requestMove(to: dest, color: .red) { showMoveConfirm = true }
                 }
             },
             .init("Move Y (\(counts.yellow))",
                   disabled: counts.yellow == 0 || busy,
                   icon: "circle.fill", iconColor: .yellow) {
                 if let dest = chooseMoveDestination() {
-                    appState.requestMove(to: dest, color: .yellow); showMoveConfirm = true
+                    if appState.requestMove(to: dest, color: .yellow) { showMoveConfirm = true }
                 }
             },
             .init("Move G (\(counts.green))",
                   disabled: counts.green == 0 || busy,
                   icon: "circle.fill", iconColor: .green) {
                 if let dest = chooseMoveDestination() {
-                    appState.requestMove(to: dest, color: .green); showMoveConfirm = true
+                    if appState.requestMove(to: dest, color: .green) { showMoveConfirm = true }
                 }
             },
             .init("Move All Flagged (\(counts.all))",
                   disabled: counts.all == 0 || busy,
                   icon: "circle.fill") {
                 if let dest = chooseMoveDestination() {
-                    appState.requestMove(to: dest, color: nil); showMoveConfirm = true
+                    if appState.requestMove(to: dest, color: nil) { showMoveConfirm = true }
                 }
             },
         ]) {

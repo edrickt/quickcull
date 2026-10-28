@@ -65,17 +65,14 @@ public enum ImageMetadataProvider {
                 dimensions = pixelDimensions(props)
             }
             if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
-                let make = tiff[kCGImagePropertyTIFFMake] as? String
-                let model = tiff[kCGImagePropertyTIFFModel] as? String
-                if make != nil || model != nil {
-                    camera = [make, model].compactMap { $0 }.joined(separator: " ")
-                }
+                camera = Self.cameraName(make: tiff[kCGImagePropertyTIFFMake] as? String,
+                                         model: tiff[kCGImagePropertyTIFFModel] as? String)
             }
             // Lens: EXIF LensModel / AuxLensModel (TIFF LensModel does not exist as kCG constant)
             var exifLens: String?
             if let exifTmp = props[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-                exifLens = exifTmp[kCGImagePropertyExifLensModel] as? String
-                    ?? exifTmp[kCGImagePropertyExifAuxLensModel] as? String
+                exifLens = Self.trimmed(exifTmp[kCGImagePropertyExifLensModel] as? String)
+                    ?? Self.trimmed(exifTmp[kCGImagePropertyExifAuxLensModel] as? String)
             }
             if let exifLens {
                 lens = exifLens
@@ -146,6 +143,25 @@ public enum ImageMetadataProvider {
             exposureBias: exposureBias,
             whiteBalance: whiteBalance
         )
+    }
+
+    /// Whitespace belongs to no EXIF string: PENTAX pads Make and Model, and an
+    /// untrimmed value rendered as `PENTAX              PENTAX K-01`.
+    private static func trimmed(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Most makers repeat themselves in the model tag (`Make = "Canon"`,
+    /// `Model = "Canon EOS 30D"`), so joining both unconditionally rendered
+    /// "Canon Canon EOS 30D".
+    static func cameraName(make: String?, model: String?) -> String? {
+        let make = trimmed(make)
+        let model = trimmed(model)
+        guard let model else { return make }
+        guard let make else { return model }
+        return model.lowercased().hasPrefix(make.lowercased()) ? model : "\(make) \(model)"
     }
 
     /// Reads "W×H" from an image file's own properties (header only, no

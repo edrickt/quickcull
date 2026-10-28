@@ -46,8 +46,14 @@ public final class Session {
 
     public init(files: [SessionFile]) {
         precondition(!files.isEmpty, "Session requires at least one file")
-        self.files = files
-        self.allFiles = files
+        // Identities must be unique: every lookup below is id-keyed, and the
+        // windows assert on uniqueness. `AppState` dedupes its import, but
+        // `Session` is public, so a repeated URL is dropped here rather than
+        // trapping in a dictionary literal.
+        var seen = Set<String>()
+        let unique = files.filter { seen.insert($0.id).inserted }
+        self.files = unique
+        self.allFiles = unique
         rebuildIDPositions()
     }
 
@@ -152,12 +158,12 @@ public final class Session {
         return best
     }
 
-    /// Toggles the current photo's reject flag. Under a non-All filter the
-    /// flip always drops the photo out of the visible sequence, so the next
-    /// match takes its place (index clamped at the end); if the sequence
-    /// empties entirely the filter falls back to All, keeping the photo.
-    /// Returns whether the visible sequence changed (always false in All
-    /// mode).
+    /// Toggles the current photo's reject flag. A filter combination can keep
+    /// matching the photo after the flip (unflagged-included plus its colour),
+    /// in which case nothing moves; otherwise the photo drops out, the same
+    /// index shows the next match (clamped at the end), and a flip that empties
+    /// the sequence falls back to All, keeping the photo current.
+    /// Returns whether the visible sequence changed (always false in All mode).
     @discardableResult
     public func toggleFlag(color: FlagColor) -> Bool {
         guard !files.isEmpty else { return false }

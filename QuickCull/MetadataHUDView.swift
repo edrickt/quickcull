@@ -14,12 +14,16 @@ struct MetadataHUDView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 if let histogram, let stats {
+                    // A rendered histogram (X-Trans, Fovea, or no sidecar) is
+                    // sRGB pixel counts, not sensor counts: label it so clipped
+                    // percentage is not read as sensor clipping.
+                    let prefix = histogram.isRendered ? "Rendered · " : ""
                     VStack(spacing: 8) {
-                        HistogramStatRow(histogram: histogram, stats: stats,
-                                         topLabel: stats.rgbClippingText, topMean: "Mean \(stats.rgbMean)",
+                        HistogramStatRow(stats: stats,
+                                         topLabel: prefix + stats.rgbClippingText, topMean: "Mean \(stats.rgbMean)",
                                          canvas: { RawHistogramView(histogram: histogram).frame(height: 72) })
-                        HistogramStatRow(histogram: histogram, stats: stats,
-                                         topLabel: stats.lumaClippingText, topMean: "Mean \(stats.lumaMean)",
+                        HistogramStatRow(stats: stats,
+                                         topLabel: prefix + stats.lumaClippingText, topMean: "Mean \(stats.lumaMean)",
                                          canvas: { RawLuminanceHistogramView(histogram: histogram).frame(height: 72) })
                     }
                     .padding(.horizontal, 10)
@@ -132,7 +136,6 @@ struct HistogramStats {
 
 /// Shared stat-row layout for the two histogram panels: labels above, canvas below.
 private struct HistogramStatRow<Canvas: View>: View {
-    let histogram: RawHistogram
     let stats: HistogramStats
     let topLabel: String
     let topMean: String

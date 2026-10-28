@@ -61,7 +61,12 @@ public final class LibRawDecoder: RawDecoding {
         let sizes = handle.pointee.sizes
         let filters = handle.pointee.idata.filters
         guard let ptr = raw.raw_image, sizes.raw_width > 0, sizes.raw_height > 0 else { return nil }
-        guard filters != 9 && filters != 1 else { return nil } // 9=X-Trans 6x6, 1=16x16 non-Bayer
+        // 9 = X-Trans 6x6, 1 = 16x16 non-Bayer, 0 = no CFA at all (monochrome
+        // sensors, where LibRaw's COLOR() returns the "0+1+2+3" special value).
+        // The 2x2 LUT below would read every photosite of a mono raw as channel
+        // 0 and draw an all-red histogram that looks like a sensor defect.
+        guard filters != 0, filters != 9, filters != 1,
+              handle.pointee.idata.colors >= 3 else { return nil }
         let rawW = Int(sizes.raw_width), rawH = Int(sizes.raw_height)
         let left = Int(sizes.left_margin), top = Int(sizes.top_margin)
         let w = Int(sizes.iwidth), h = Int(sizes.iheight)
