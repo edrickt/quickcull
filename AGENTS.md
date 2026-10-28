@@ -14,7 +14,7 @@ xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore -configuration Deb
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCull -configuration Release \
   -derivedDataPath Build/Release build
 
-# Full suite (207 tests at the time of writing, ~85s)
+# Full suite (227 tests at the time of writing, ~80s)
 xcodebuild -project QuickCull.xcodeproj -scheme QuickCullCore -configuration Debug \
   -destination 'platform=macOS' -derivedDataPath /tmp/qc-dd CODE_SIGNING_ALLOWED=NO build-for-testing
 xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest

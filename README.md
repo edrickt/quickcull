@@ -2,18 +2,43 @@
 
 A native macOS app for fast photo culling. It decodes RAWs from every major camera maker plus JPEG, PNG and HEIC into full-resolution previews, lets you scrub with the arrow keys, flag with three colors, filter by color, and move the flagged ones to Trash or another folder.
 
-See `docs/superpowers/specs/` for the full design.
+Download the latest release from [Releases](https://github.com/edrickt/quickcull/releases/latest) — a universal app for macOS 14 or later, Apple silicon or Intel. Install steps are below; `docs/superpowers/specs/` holds the design.
 
 ## Highlights
 
 - **True RAW histogram, not a preview.** FastRawViewer-style linear counts taken before white balance and gamma. Each Bayer photosite counts once by color, so R is about 1/4 of pixels, G about 1/2, B about 1/4. Sensor maximum is recorded per camera (for example 4095 on CR2/NEF, 16383 on CR3). You see clipping percent, mean, and overall luminance in two 72pt log-y panels. X-Trans and Fuji super-CCD fall back to a rendered 255 histogram (computed from a 1024px sample, not the full-resolution bitmap).
 - **Decode first, scrub without waiting.** LibRaw demosaics every RAW at full resolution, ImageIO handles JPEG, PNG and HEIC, everything lands as a q75 JPEG in the local cache. The app finishes decoding before you can scrub, so the arrow keys never stall on a decode.
-- **Memory stays flat.** The viewer decodes the current image plus −5/+10 at full resolution — so the Space loupe is true source-pixel 1:1 at any image size and scrubbing within the tier is instant — while the rest of the −10/+20 window pre-loads at half size (DCT-subsampled, ~4× less memory) and upgrades to full-res the moment you land on it. Both the viewer window and the thumbnails are bounded by a fixed viewport, never by shoot size: the strip keeps at most 61 × 320px thumbnails, and the grid keeps at most 61 as well, the most recent cells you scrolled to. Where the loupe lands on a half-size placeholder it says `preview` instead of claiming 100%. Thumbnail and display decodes are throttled, and a superseded decode is cancelled, so a fast scrub or a grid fill can never fire hundreds at once. 16 full-res + 15 half-size 20MP images ≈ 1.2GB (fits 8GB machines for typical shoots; ~2.3GB at 45MP), tunable with `defaults write com.quickcull displayFullResBehind N` and `displayFullResAhead N` (clamped to the window extent).
+- **Memory stays flat.** The viewer decodes the current image plus −5/+10 at full resolution — so the Space loupe is true source-pixel 1:1 at any image size and scrubbing within the tier is instant — while the rest of the −10/+20 window pre-loads at half size (DCT-subsampled, ~4× less memory) and upgrades to full-res the moment you land on it. Both the viewer window and the thumbnails are bounded by a fixed viewport, never by shoot size: the strip keeps at most 61 × 320px thumbnails, and the grid keeps at most 61 as well, the most recent cells you scrolled to. Where the loupe lands on a half-size placeholder it says `preview` instead of claiming 100%. Thumbnail and display decodes are throttled, and a superseded decode is cancelled, so a fast scrub or a grid fill can never fire hundreds at once. 16 full-res + 15 half-size 20MP images ≈ 1.2GB (fits 8GB machines for typical shoots; ~2.3GB at 45MP), tunable with `defaults write com.quickcull.app displayFullResBehind N` and `defaults write com.quickcull.app displayFullResAhead N` (clamped to the window extent).
 - **Three ways to look.** Single shows one image fit to window. Split shows current and next side by side with an 8pt gap and no divider, and both panes share the same zoom and pan. Grid shows adaptive 160 to 200pt thumbnails, selection by file id so it survives filters, and batch flag with Z/X/C.
 - **Metadata where you need it.** A 240pt sidebar slides in without covering the image. It shows file name and path, dimensions, file size, camera and lens, ISO, aperture, shutter, focal length, date taken, exposure bias and white balance, plus the histogram above the rows.
 - **Titles under every thumb.** Each filmstrip and grid thumbnail shows the file name, single line, tail truncated, with the full name in a tooltip.
 - **Three colors, not one flag.** `Z` is red, `X` is yellow, `C` is green. Each photo holds at most one color; hit the same key to clear it, hit a different key to replace it. The badge is a corner triangle tinted to match. Filter to All, R, Y, G, or Unflagged with live counts. Trash and Move are dropdown menus with per-color choices (R, Y, G, All Flagged) that disable when that color has nothing flagged or while a commit is running. Move picks a folder each time with a system picker, moves flat, and auto-renames to `name 1.ext` when the destination exists. Grid batch works too: select a few thumbs and `Z` turns them all red at once.
 - **Zoom and pan that track your fingers.** Pinch 1x to 4x, double-click to toggle fit and 2x, drag to pan when zoomed, two-finger scroll pans synchronously and only when the cursor is over that pane. No async tick, no dead zone, no animation lag. Pan is clamped so the image never leaves the viewport.
+
+## Install
+
+**Requirements:** macOS 14 (Sonoma) or later, Apple silicon or Intel. Nothing else to install — LibRaw ships inside the app.
+
+**Download.** Take the `QuickCull-…-macOS-universal.zip` asset from [Releases](https://github.com/edrickt/quickcull/releases/latest), unzip it, and drag `QuickCull.app` into `/Applications`.
+
+QuickCull is ad-hoc signed, not notarized, so macOS refuses the first launch as an unverified developer. Approve it once:
+
+1. Finder → Applications → right-click `QuickCull` → **Open** → **Open**.
+2. Every launch after that is a normal double-click.
+
+Or clear the download flag from Terminal instead of using the right-click path:
+
+    xattr -dr com.apple.quarantine /Applications/QuickCull.app
+
+**From source.** With Xcode 16 or later:
+
+    git clone https://github.com/edrickt/quickcull.git
+    cd quickcull
+    ./Scripts/install.sh              # builds Release and installs to /Applications (needs admin)
+    ./Scripts/install.sh --user       # installs to ~/Applications instead
+    ./Scripts/install.sh --no-build   # reinstalls the last build without rebuilding
+
+The build compiles LibRaw 0.22.1 into `Build/libraw/` the first time, which takes a few minutes.
 
 ## How it works
 
@@ -54,15 +79,12 @@ Click a filmstrip thumbnail to jump to that photo. In grid, click to select, Cmd
 
 ## Run
 
-`./start.sh` builds a Release copy and launches it, quitting any running instance first. `./stop.sh` quits the app.
+For the development loop, from a checkout:
 
-To install it like a regular Mac app (so you can double-click it from Finder, Spotlight, or the Dock):
+    ./start.sh   # builds Release and launches, quitting any running instance first
+    ./stop.sh    # quits the app
 
-    ./Scripts/install.sh              # builds Release and installs to /Applications/QuickCull.app (needs admin)
-    ./Scripts/install.sh --user       # installs to ~/Applications/QuickCull.app
-    ./Scripts/install.sh --no-build   # reinstall the last build without rebuilding
-
-The app is ad-hoc signed for local use, so on first launch Finder may warn about an unverified developer — right-click → Open → Open once, then it opens normally.
+To keep a copy in Applications, use [Install](#install) instead.
 
 ## Cache
 
@@ -97,7 +119,7 @@ It downloads from the public sample sources and checks each file against its pin
 
 ## Licensing
 
-QuickCull dynamically links LibRaw, LGPL-2.1, to decode raw files. The library is shipped unmodified as `libraw.dylib` in `QuickCull.app/Contents/Frameworks/` and you may replace it with your own build of the same version. See [`NOTICE`](NOTICE) for details.
+QuickCull dynamically links LibRaw, LGPL-2.1, to decode raw files. The library is shipped unmodified as `libraw.dylib` inside `QuickCull.app/Contents/Frameworks/QuickCullCore.framework/Versions/A/Frameworks/`, and you may replace it with your own build of the same version. See [`NOTICE`](NOTICE) for details.
 
 ## Out of scope for v1
 

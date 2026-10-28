@@ -424,7 +424,7 @@ public final class ImageWindow {
     /// Memory is bounded by the window extent, never by shoot size: 16
     /// full-res + 15 half-size 20 MP images ≈ 1.2 GB (fits 8 GB machines
     /// for typical shoots; ~2.3 GB at 45 MP). The tier is tunable via
-    /// `defaults write com.quickcull displayFullResBehind N` /
+    /// `defaults write com.quickcull.app displayFullResBehind N` /
     /// `displayFullResAhead N`. Decodes share a gate so a fill never fires
     /// many parallel ~100+ MB decodes at once.
     public static func display(files: [SessionFile], cache: ImageCacheStore) -> ImageWindow {
@@ -471,7 +471,7 @@ public final class ImageWindow {
     nonisolated static var displayExtentAhead: Int { 20 }
 
     /// Full-res tier behind the current image (see `display`). Hidden
-    /// override: `defaults write com.quickcull displayFullResBehind N`, clamped
+    /// override: `defaults write com.quickcull.app displayFullResBehind N`, clamped
     /// to the window extent so a typo cannot decode the whole window full-res.
     nonisolated static var displayFullResBehind: Int {
         let n = UserDefaults.standard.integer(forKey: "displayFullResBehind")
@@ -479,7 +479,7 @@ public final class ImageWindow {
     }
 
     /// Full-res tier ahead of the current image (see `display`). Hidden
-    /// override: `defaults write com.quickcull displayFullResAhead N`, clamped
+    /// override: `defaults write com.quickcull.app displayFullResAhead N`, clamped
     /// to the window extent.
     nonisolated static var displayFullResAhead: Int {
         let n = UserDefaults.standard.integer(forKey: "displayFullResAhead")
