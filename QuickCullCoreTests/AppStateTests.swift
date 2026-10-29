@@ -101,7 +101,7 @@ final class AppStateTests: XCTestCase {
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
         let trasher = StubTrasher()
-        trasher.failIDs = [a.path]
+        trasher.failIDs = [RawFileIdentity.fileID(for: a)]
         let state = makeState(trasher: trasher)
         state.importFiles(urls: [a, b])
         await waitForScrubbing(state)
@@ -162,7 +162,7 @@ final class AppStateTests: XCTestCase {
     func testImportFailuresSurviveIntoScrubbing() async throws {
         let ok = try TestFixtures.makeRawFile(named: "ok.cr2", in: tempDir)
         let bad = try TestFixtures.makeRawFile(named: "bad.cr2", in: tempDir)
-        let state = makeState(decoder: StubDecoder(failIDs: [bad.path]))
+        let state = makeState(decoder: StubDecoder(failIDs: [RawFileIdentity.fileID(for: bad)]))
         state.importFiles(urls: [ok, bad])
         await waitForScrubbing(state)
 
@@ -178,7 +178,7 @@ final class AppStateTests: XCTestCase {
     func testFailedFilesAreRemovedFromSession() async throws {
         let ok = try TestFixtures.makeRawFile(named: "ok.cr2", in: tempDir)
         let bad = try TestFixtures.makeRawFile(named: "bad.cr2", in: tempDir)
-        let state = makeState(decoder: StubDecoder(failIDs: [bad.path]))
+        let state = makeState(decoder: StubDecoder(failIDs: [RawFileIdentity.fileID(for: bad)]))
         state.importFiles(urls: [ok, bad])
         await waitForScrubbing(state)
 
@@ -190,7 +190,7 @@ final class AppStateTests: XCTestCase {
     func testAllFailedReturnsToEmptyState() async throws {
         let bad1 = try TestFixtures.makeRawFile(named: "bad1.cr2", in: tempDir)
         let bad2 = try TestFixtures.makeRawFile(named: "bad2.cr2", in: tempDir)
-        let state = makeState(decoder: StubDecoder(failIDs: [bad1.path, bad2.path]))
+        let state = makeState(decoder: StubDecoder(failIDs: [RawFileIdentity.fileID(for: bad1), RawFileIdentity.fileID(for: bad2)]))
         state.importFiles(urls: [bad1, bad2])
         await waitForEmpty(state)
 

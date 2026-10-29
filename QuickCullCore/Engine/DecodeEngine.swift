@@ -97,6 +97,9 @@ public actor DecodeEngine {
     public func decodeAll(files: [SessionFile]) -> AsyncStream<Event> {
         AsyncStream { continuation in
             let task = Task {
+                // Each import owns the diagnostic log: without this a session
+                // that imports ten shoots holds every file's record forever.
+                self.benchmarkAccum.removeAll()
                 let queue = JobQueue<SessionFile>()
                 for file in files { await queue.enqueue(file) }
 
@@ -247,6 +250,14 @@ final class LockedAccumulator<Element>: @unchecked Sendable {
     func append(_ item: Element) {
         lock.lock(); defer { lock.unlock() }
         items.append(item)
+    }
+
+    /// Drops all records. `DecodeEngine` calls this at the start of every
+    /// import so `benchmarks()` reflects the latest run instead of growing
+    /// one record per file for the life of the process.
+    func removeAll() {
+        lock.lock(); defer { lock.unlock() }
+        items.removeAll(keepingCapacity: true)
     }
 
     func snapshot() -> [Element] {

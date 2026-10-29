@@ -8,16 +8,16 @@ final class TrashCommitTests: XCTestCase {
         let outcomes = TrashCommit(trasher: trasher).commit(files: files)
         XCTAssertEqual(outcomes.count, 2)
         XCTAssertTrue(outcomes.allSatisfy(\.succeeded))
-        XCTAssertEqual(Set(trasher.trashed), Set(["/tmp/shoot/a.cr2", "/tmp/shoot/b.cr2"]))
+        XCTAssertEqual(Set(trasher.trashed), Set(files.map(\.id)))
     }
 
     func testCommitReportsPerFileFailuresAndKeepsGoing() {
         let files = TestFixtures.makeFiles(["a.cr2", "bad.cr2", "c.cr2"])
         let trasher = StubTrasher()
-        trasher.failIDs = ["/tmp/shoot/bad.cr2"]
+        trasher.failIDs = [files[1].id]
         let outcomes = TrashCommit(trasher: trasher).commit(files: files)
         XCTAssertEqual(outcomes.filter(\.succeeded).count, 2)
-        XCTAssertEqual(outcomes.first { !$0.succeeded }?.file.id, "/tmp/shoot/bad.cr2")
+        XCTAssertEqual(outcomes.first { !$0.succeeded }?.file.id, files[1].id)
         XCTAssertEqual(trasher.trashed.count, 2)
     }
 

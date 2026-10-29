@@ -123,7 +123,7 @@ final class AppStateCommitLifecycleTests: XCTestCase {
         let trasher = StubTrasher()
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
-        trasher.failIDs = [a.path]
+        trasher.failIDs = [RawFileIdentity.fileID(for: a)]
         let state = AppState(decoder: StubDecoder(), cache: cache, trasher: trasher)
         state.importFiles(urls: [a, b])
         await waitForScrubbing(state)

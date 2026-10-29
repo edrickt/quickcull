@@ -31,4 +31,17 @@ final class RawFileIdentityTests: XCTestCase {
         let url = URL(fileURLWithPath: "/Users/x/../x/photo.cr2")
         XCTAssertEqual(RawFileIdentity.fileID(for: url), "/Users/x/photo.cr2")
     }
+
+    func testFileIDResolvesSymlinksSoAnAliasIsNotADuplicate() throws {
+        let dir = try FileManager.default.url(for: .itemReplacementDirectory,
+                                              in: .userDomainMask, appropriateFor: URL(fileURLWithPath: "/tmp"),
+                                              create: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("target.cr2")
+        try Data(repeating: 7, count: 16).write(to: target)
+        let link = dir.appendingPathComponent("link.cr2")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        XCTAssertEqual(RawFileIdentity.fileID(for: link), RawFileIdentity.fileID(for: target),
+                        "a symlinked alias must share the target's identity or it enters a session twice")
+    }
 }

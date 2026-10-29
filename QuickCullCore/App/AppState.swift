@@ -180,7 +180,16 @@ public final class AppState {
         viewMode = .scrub
         gridSelection = []
         gridAnchorID = nil
-        let unique = Array(Set(urls.map(\.standardizedFileURL))).sorted { $0.path < $1.path }
+        // Dedupe by file identity (symlinks resolved): the same photo picked
+        // through an alias and via its target is one file, not two.
+        var seenIDs = Set<String>()
+        var deduped: [URL] = []
+        deduped.reserveCapacity(urls.count)
+        for url in urls {
+            let id = RawFileIdentity.fileID(for: url)
+            if seenIDs.insert(id).inserted { deduped.append(url) }
+        }
+        let unique = deduped.sorted { $0.path < $1.path }
         let supported = unique.filter(RawFileIdentity.isSupported)
         guard !supported.isEmpty else {
             // Nothing importable: surface the unsupported selection in the
@@ -366,9 +375,8 @@ public final class AppState {
         guard !isCommitting, !isMoving else { return }
         if gridSelection.contains(id) { gridSelection.remove(id) }
         else { gridSelection.insert(id) }
-        // Intentionally does not update gridAnchorID: Finder-like semantics where
-        // Cmd-click toggles selection without moving the Shift-range anchor.
-        // Plan says gridAnchorID = id but test expects no anchor move; keep as is.
+        // Cmd-click toggles selection without moving the Shift-range anchor
+        // (Finder semantics); Shift-clicks anchor on selectSingle/selectAll.
     }
 
     public func selectRange(to targetID: String) {

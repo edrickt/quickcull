@@ -26,7 +26,7 @@ final class AppStateMoveTests: XCTestCase {
         var moved: [URL] = []
         func move(from: URL, to: URL) throws {
             if let g = gate { g.wait() }
-            if failIDs.contains(from.path) { throw NSError(domain: "t", code: 1) }
+            if failIDs.contains(RawFileIdentity.fileID(for: from)) { throw NSError(domain: "t", code: 1) }
             moved.append(from)
         }
     }
@@ -48,7 +48,7 @@ final class AppStateMoveTests: XCTestCase {
     func testConfirmMoveRemovesSucceededAndKeepsFailed() async throws {
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
-        let mover = StubMover(); mover.failIDs = [a.path]
+        let mover = StubMover(); mover.failIDs = [RawFileIdentity.fileID(for: a)]
         let s = makeState(mover: mover)
         s.importFiles(urls: [a,b]); await waitForScrubbing(s)
         s.handle(.toggleFlag(.red)); s.handle(.next); s.handle(.toggleFlag(.red))

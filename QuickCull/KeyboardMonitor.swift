@@ -46,9 +46,17 @@ final class KeyboardMonitor {
     }
 
     /// A modal, a sheet (the import panel is one), or a text field owns every
-    /// key.
+    /// key. Sheets are checked two ways: the key window may be the sheet
+    /// itself (`isSheet`), or the sheet may hang off it (`attachedSheet`) —
+    /// SwiftUI's `.fileImporter` presents either way depending on context,
+    /// and checking only one left arrows/Space consumed as cull keys while
+    /// the panel was open.
     private static var systemOwnsKeys: Bool {
         if NSApp.modalWindow != nil { return true }
+        // Any window carrying a sheet owns the keys, not just the key window:
+        // the import panel is app-wide (the monitor is too), so a sheet on a
+        // background window still means the user is picking files.
+        if NSApp.windows.contains(where: { $0.isSheet || $0.attachedSheet != nil }) { return true }
         if NSApp.keyWindow?.isSheet == true { return true }
         return NSApp.keyWindow?.firstResponder is NSTextView
     }
@@ -62,7 +70,9 @@ final class KeyboardMonitor {
             hasControl: flags.contains(.control),
             hasOption: flags.contains(.option),
             hasModalWindow: NSApp.modalWindow != nil,
-            hasSheet: NSApp.keyWindow?.isSheet == true,
+            hasSheet: NSApp.keyWindow?.isSheet == true
+                || NSApp.keyWindow?.attachedSheet != nil
+                || NSApp.windows.contains(where: { $0.isSheet }),
             isEditingText: NSApp.keyWindow?.firstResponder is NSTextView)
     }
 }

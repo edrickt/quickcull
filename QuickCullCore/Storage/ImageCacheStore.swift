@@ -17,9 +17,14 @@ public actor ImageCacheStore {
     }
 
     public static func defaultBaseURL() -> URL {
-        let appSupport = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("QuickCull/cache", isDirectory: true)
+        // `applicationSupportDirectory` is effectively always present, but a
+        // force-unwrap here would crash the app on first launch if it ever
+        // were not (managed / locked-down volumes). Fall back to the temp
+        // dir rather than dying: the cache is disposable by design.
+        let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                            in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("QuickCull/cache", isDirectory: true)
     }
 
     private var baseDirEnsured = false

@@ -28,7 +28,7 @@ final class DecodeEngineTests: XCTestCase {
 
     func testFailuresAreCollectedNotFatal() async throws {
         let files = TestFixtures.makeFiles(["ok.cr2", "bad.cr2", "also_ok.cr2"])
-        let decoder = StubDecoder(failIDs: ["/tmp/shoot/bad.cr2"])
+        let decoder = StubDecoder(failIDs: [files[1].id])
         let (cache, base) = try await TestFixtures.makeTempCache()
         defer { try? FileManager.default.removeItem(at: base) }
         let engine = DecodeEngine(decoder: decoder, cache: cache)
@@ -39,7 +39,7 @@ final class DecodeEngineTests: XCTestCase {
         }
         let failures = outcomes.filter { $0.error != nil }
         XCTAssertEqual(failures.count, 1)
-        XCTAssertEqual(failures.first?.file.id, "/tmp/shoot/bad.cr2")
+        XCTAssertEqual(failures.first?.file.id, files[1].id)
         XCTAssertEqual(failures.first?.error, .cannotUnpack("stub failure"))
     }
 
@@ -240,5 +240,21 @@ final class DecodeEngineTests: XCTestCase {
         }
         XCTAssertEqual(outcomes.map { $0.file.url.lastPathComponent },
                        ["a.cr2", "b.cr2", "c.cr2", "d.cr2"])
+    }
+
+    func testBenchmarksReflectOnlyTheLatestImport() async throws {
+        let first = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
+        let second = TestFixtures.makeFiles(["c.cr2", "d.cr2", "e.cr2"])
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let engine = DecodeEngine(decoder: StubDecoder(), cache: cache)
+
+        _ = await collect(engine.decodeAll(files: first))
+        let firstCount = await engine.benchmarks().count
+        XCTAssertEqual(firstCount, 2)
+        _ = await collect(engine.decodeAll(files: second))
+        let secondCount = await engine.benchmarks().count
+        XCTAssertEqual(secondCount, 3,
+                        "benchmarks must not accumulate across imports or long sessions leak one record per file")
     }
 }

@@ -40,6 +40,8 @@ struct GridView: View {
             ZStack { Color.black; Text("No photos in this filter").foregroundStyle(.secondary) }
         } else {
             // Compute once per body evaluation; GridCell receives plain values, not @Environment reads.
+            let currentIndex = appState.session?.currentIndex ?? 0
+            let currentID = files.indices.contains(currentIndex) ? files[currentIndex].id : nil
             let elements: [(index: Int, file: SessionFile, isSelected: Bool, flagColor: FlagColor?, image: CGImage?)] = files.enumerated().map { idx, file in
                 (index: idx,
                  file: file,
@@ -47,7 +49,8 @@ struct GridView: View {
                  flagColor: flags[file.id],
                  image: thumbImages[idx])
             }
-            ScrollView {
+            ScrollViewReader { proxy in
+                ScrollView {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(elements, id: \.file.id) { element in
                         GridCell(
@@ -98,6 +101,15 @@ struct GridView: View {
                     }
                 }
                 .padding(12)
+                }
+                // Entering grid opens at the shoot's start with no mark for where
+                // the user was (QA-40): scroll to the current photo on appear so
+                // the position scrub left off is on screen, mirroring the
+                // filmstrip's appear-scroll. No @State for the target: the
+                // session owns the current index.
+                .task(id: currentID) {
+                    if let currentID { proxy.scrollTo(currentID, anchor: .center) }
+                }
             }
             .background(Color.black.opacity(0.04))
         }

@@ -44,8 +44,14 @@ public enum RawFileIdentity {
         return nil
     }
 
-    /// Stable, unique identity for a file: the standardized absolute path.
+    /// Stable, unique identity for a file: the standardized absolute path
+    /// with symlinks resolved. Spelling alone is not identity: a file picked
+    /// through an alias and the same file picked via its target compare
+    /// unequal under `standardizedFileURL`, so the alias entered a session
+    /// twice and earned a second cache entry. The cache is wiped on launch
+    /// and quit, so the one-time re-decode this costs existing previews is
+    /// free in practice.
     public static func fileID(for url: URL) -> String {
-        url.standardizedFileURL.path
+        url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 }

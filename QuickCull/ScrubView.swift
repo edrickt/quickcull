@@ -56,6 +56,15 @@ struct ScrubView: View {
         // tearing the session down mid-commit would leave the in-flight
         // completion writing state for a session that no longer exists.
         .focusedSceneValue(\.newSessionAction, newSessionAction)
+        // The pending Trash/Move set is app-wide but the alert is per-window:
+        // closing the window that opened it would otherwise leave the slot
+        // taken with no dialog left to clear it, disabling Trash/Move in
+        // every remaining window until relaunch. Only this window's own
+        // pending alert cancels here (`show*` is per-window state).
+        .onDisappear {
+            if showCommitConfirm { appState.cancelCommit() }
+            if showMoveConfirm { appState.cancelMove() }
+        }
         .alert("Move \(appState.pendingCommitCount) \(appState.pendingCommitColor?.displayName ?? "flagged") file(s) to Trash?",
                isPresented: $showCommitConfirm) {
             Button("Move to Trash", role: .destructive) {
