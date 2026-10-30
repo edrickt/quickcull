@@ -2,7 +2,7 @@
 
 ## Build and test
 
-`QuickCull.xcodeproj` is hand-maintained with synchronized file groups, so new
+`QuickCull.xcodeproj` is hand-maintained with synchronized file groups (`PBXFileSystemSynchronizedRootGroup`), so new
 files under `QuickCull/`, `QuickCullCore/` and `QuickCullCoreTests/` join their
 target automatically.
 
@@ -29,7 +29,7 @@ xcrun xctest -XCTest QuickCullCoreTests.SessionTests \
 ## Type checking
 
 `xcodebuild` is the only authoritative type check. The Swift language server is
-disabled in `.pi-lens.json` on purpose: with no `compile_commands.json` or
+disabled in `.pi-lens.json` on purpose: with no checked-in `compile_commands.json` or
 `buildServer.json` it type-checks one file at a time and reports "Cannot find
 type …" for every type declared in another file (`SessionFile`, `FlagColor`,
 `CullAction`, `XCTest`, …). Those reports are noise on every multi-file change.
@@ -37,8 +37,10 @@ Confirm anything suspect with `xcodebuild` before touching code.
 
 ## Conventions
 
-- No third-party dependencies. LibRaw is vendored under `Scripts/` and built by
-  `Scripts/build-libraw.sh`.
+- No third-party dependencies. LibRaw 0.22.1 is downloaded and built by
+  `Scripts/build-libraw.sh` into `Build/libraw/` (universal arm64 + x86_64); no
+  LibRaw sources are checked in. `Scripts/gen-compile-db.sh` can emit an
+  (ignored) `compile_commands.json`, but `xcodebuild` below stays authoritative.
 - `QuickCullCore` holds all logic and is unit-tested; the app target holds
   SwiftUI/AppKit views only.
 - Comments explain a non-obvious *why*. Do not narrate what the code does.

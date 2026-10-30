@@ -470,8 +470,10 @@ public final class ImageWindow {
     /// to the filmstrip thumb and decode full-res on landing.
     ///
     /// Memory is bounded by the window extent, never by shoot size: 16
-    /// full-res + 15 half-size 20 MP images ≈ 1.2 GB (fits 8 GB machines
-    /// for typical shoots; ~2.3 GB at 45 MP). The tier is tunable via
+    /// full-res + 15 half-size 20 MP images ≈ 1.2 GB fresh (fits 8 GB machines
+    /// for typical shoots), rising toward ≈1.7 GB once scrubbed across the
+    /// window because a visited image stays full-res until evicted
+    /// (~3.6 GB at 45 MP). The tier is tunable via
     /// `defaults write com.quickcull.app displayFullResBehind N` /
     /// `displayFullResAhead N`. Decodes share a gate so a fill never fires
     /// many parallel ~100+ MB decodes at once.
