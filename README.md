@@ -121,7 +121,9 @@ It downloads from the public sample sources and checks each file against its pin
 
 ## Licensing
 
-QuickCull dynamically links LibRaw, LGPL-2.1, to decode raw files. The library is shipped unmodified as `libraw.dylib` inside `QuickCull.app/Contents/Frameworks/QuickCullCore.framework/Versions/A/Frameworks/`, and you may replace it with your own build of the same version. See [`NOTICE`](NOTICE) for details.
+QuickCull is MIT-licensed. See [`LICENSE`](LICENSE).
+
+QuickCull dynamically links LibRaw, LGPL-2.1, to decode raw files. The library is shipped unmodified as `libraw.dylib` inside `QuickCull.app/Contents/Frameworks/QuickCullCore.framework/Versions/A/Frameworks/`, and you may replace it with your own build of the same version. See [`NOTICE`](NOTICE) for third-party details.
 
 ## Out of scope for v1
 
