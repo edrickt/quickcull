@@ -23,13 +23,13 @@ xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 xcrun xctest -XCTest QuickCullCoreTests.SessionTests \
   /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 
-./start.sh   # Release build + launch
+Scripts/start.sh   # Release build + launch
 ```
 
 ## Type checking
 
-`xcodebuild` is the only authoritative type check. The Swift language server is
-disabled in `.pi-lens.json` on purpose: with no checked-in `compile_commands.json` or
+`xcodebuild` is the only authoritative type check. Do not rely on the editor's
+Swift language server for this repo: with no checked-in `compile_commands.json` or
 `buildServer.json` it type-checks one file at a time and reports "Cannot find
 type …" for every type declared in another file (`SessionFile`, `FlagColor`,
 `CullAction`, `XCTest`, …). Those reports are noise on every multi-file change.

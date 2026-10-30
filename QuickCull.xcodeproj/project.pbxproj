@@ -73,7 +73,7 @@
 		B10000000000000000000004 /* QuickCullCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QuickCullCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000000000000000000004 /* libraw.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libraw.dylib; path = Build/libraw/libraw.dylib; sourceTree = "<group>"; };
 		A1000000000000000000002D /* Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "QuickCull/Resources/Licenses"; sourceTree = "<group>"; };
-		C10000000000000000000010 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		C10000000000000000000010 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Assets/AppIcon.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */

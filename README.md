@@ -2,7 +2,7 @@
 
 A native macOS app for fast photo culling. It decodes RAWs from every major camera maker plus JPEG, PNG and HEIC into full-resolution previews, lets you scrub with the arrow keys, flag with three colors, filter by color, and move the flagged ones to Trash or another folder.
 
-Download the latest release from [Releases](https://github.com/edrickt/quickcull/releases/latest) — a universal app for macOS 14 or later, Apple silicon or Intel. Install steps are below; `docs/superpowers/specs/` holds the design.
+Download the latest release from [Releases](https://github.com/edrickt/quickcull/releases/latest) — a universal app for macOS 14 or later, Apple silicon or Intel. Install steps are below; `docs/archive/specs/` holds the per-feature design history.
 
 ## Highlights
 
@@ -83,14 +83,25 @@ Click a filmstrip thumbnail to jump to that photo. In grid, click to select, Cmd
 
 For the development loop, from a checkout:
 
-    ./start.sh   # builds Release and launches, quitting any running instance first
-    ./stop.sh    # quits the app
+    Scripts/start.sh   # builds Release and launches, quitting any running instance first
+    Scripts/stop.sh    # quits the app
 
 To keep a copy in Applications, use [Install](#install) instead.
 
 ## Cache
 
 Decoded photos are full-resolution q75 JPEGs in `~/Library/Application Support/QuickCull/cache`, keyed by file path, size and modification time. The cache is wiped on launch and on quit (a forced quit is covered by the next launch), so each session decodes from the originals.
+
+## Repository layout
+
+    QuickCull/          app target: SwiftUI/AppKit views only
+    QuickCullCore/      all logic (App, Commit, Decoding, Engine, Keys,
+                        Metadata, Models, Session, Storage, Window)
+    QuickCullCoreTests/ unit tests mirroring QuickCullCore, plus
+                        Support/ helpers and Fixtures/ raw samples
+    Assets/             Icon Composer package (AppIcon.icon)
+    Scripts/            build, install, fixtures, benchmarks (see Scripts/README.md)
+    docs/               index + assets; archive/ holds executed plans, specs, audits
 
 ## Build
 
