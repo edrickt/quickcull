@@ -38,6 +38,15 @@ The build compiles LibRaw 0.22.1 into `Build/libraw/` the first time, which take
 3. **Scrub.** Step with the keyboard; hold `Space` at fit for the 100% loupe — genuine source-pixel 1:1 at any image size.
 4. **Flag and commit.** Tap `Z`/`X`/`C` to flag red/yellow/green, filter if you want to review just one color, then pick Trash or Move from its dropdown and choose a color or All Flagged. Files that fail stay flagged so you can retry. `File > New Session` (⇧⌘N) wipes flags and the cache and returns to the importer.
 
+## Highlights
+
+- **True RAW histogram.** Linear counts before white balance and gamma, with clipping percent, mean, and luminance.
+- **Decode first, scrub without waiting.** Every file decoded up front at full resolution, so the arrow keys never stall.
+- **Stays responsive on big shoots.** Pre-loads around the current photo and shows true 1:1 pixels in the `Space` loupe.
+- **Three ways to look.** Single, side-by-side split with shared zoom and pan, and a grid with batch flagging.
+- **Metadata where you need it.** Sliding sidebar with camera, lens, exposure, plus file name under every thumbnail.
+- **Three colors, not one flag.** `Z` red, `X` yellow, `C` green — exclusive, same key clears; filter by color, then Trash or Move per color.
+
 ## Supported formats
 
 Raw decoded with LibRaw: Canon CR2, CR3; Nikon NEF, NRW; Sony ARW, SRF, SR2; Fujifilm RAF; Olympus and OM System ORF; Panasonic RW2; Pentax PEF, DNG; Leica and Ricoh DNG; Hasselblad 3FR, FFF; Phase One IIQ; Sigma X3F; Samsung SRW; Kodak DCR, KDC; Epson ERF.
@@ -50,25 +59,12 @@ Standard formats decoded with ImageIO: JPEG (JPG, JPEG), PNG, HEIC and HEIF. Ori
 | --- | --- |
 | `←` / `→` | Previous and next photo |
 | `↑` / `↓` | Jump back and forward 10 photos |
-| `Z` | Toggle red flag, red corner triangle; same press again clears it |
-| `X` | Toggle yellow flag; replaces red or green if one is set |
-| `C` | Toggle green flag; replaces red or yellow if one is set |
-| `Space` (hold) | 100% loupe at fit: a 280pt lens of true 1:1 source pixels that follows the cursor |
+| `Z` | Toggle red flag; same press clears |
+| `X` | Toggle yellow flag; replaces red or green |
+| `C` | Toggle green flag; replaces red or yellow |
+| `Space` (hold) | 100% loupe at fit: true 1:1 source pixels under the cursor |
 
-Flags are exclusive: a photo can be red, yellow, green, or unflagged, never two at once. In grid, with a selection, `Z`/`X`/`C` apply to every selected id and the selection clears after; with no selection they do nothing, because grid marks no current photo.
-
-Flag keys follow the letter the key prints, so `Z`/`X`/`C` work on AZERTY and Dvorak too.
-
-Filter bar has five segments: `All`, a red dot, a yellow dot, a green dot, and a flag glyph for unflagged. The segments combine — `R` + `Y` shows both colours — and tapping an active segment removes it; deselecting the last one returns to All. The live counts sit in each segment's accessibility label and in both dropdown menus. When a filter matches nothing you get an empty placeholder, not a fallback. Toggling a flag under a non-All filter drops that photo out of view; if the filter empties it falls back to All.
-
-Commit controls are two dropdowns:
-
-- **Move Flagged to Trash** → `Trash R (n)`, `Trash Y (n)`, `Trash G (n)`, `Trash All Flagged (n)`. Each runs a per-file trash to macOS Trash and reports failures. Failed files keep their color.
-- **Move Flagged** → `Move R (n)`, `Move Y (n)`, `Move G (n)`, `Move All Flagged (n)`. Opens a folder picker (you can create a folder there), then moves flat with auto-rename on collision. Same per-file success handling as Trash.
-
-Both menus disable their items when that bucket is empty and disable entirely while a move or trash is in flight, and everywhere while its confirmation dialog is up. Flag and scrub keys block during that time too; the pending set is snapshotted at request time, so a filter or view change made before confirming cannot alter the files the dialog named.
-
-Click a filmstrip thumbnail to jump to that photo. In grid, click to select, Cmd-click to toggle, Shift-click for a range, double-click to jump to single and show that photo.
+Flags are exclusive — red, yellow, green, or unflagged. In grid, `Z`/`X`/`C` apply to the selection; with no selection they do nothing. Filter with `All` + `R`/`Y`/`G`/Unflagged segments, then Trash or Move per color (or All Flagged) from the two dropdowns. Failed files keep their color so you can retry. Click a filmstrip thumb to jump; in grid, click/Cmd-click/Shift-click to select, double-click to open in single.
 
 ## Run
 
