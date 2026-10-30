@@ -4,7 +4,7 @@ Fast photo culling for macOS — scrub RAWs with the arrow keys, flag keepers in
 
 [![Release](https://img.shields.io/github/v/release/edrickt/quickcull)](https://github.com/edrickt/quickcull/releases/latest) ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-![QuickCull — single, split, and grid views](docs/assets/screenshot-main.png)
+<!-- Screenshot: docs/assets/screenshot-main.png — capture pending -->
 
 - [Download](#download) · [How it works](#how-it-works) · [Highlights](#highlights) · [Supported formats](#supported-formats) · [Controls](#controls) · [For developers](#for-developers) · [Licensing](#licensing) · [Out of scope for v1](#out-of-scope-for-v1)
 
