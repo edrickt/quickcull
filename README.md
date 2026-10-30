@@ -1,25 +1,16 @@
 # QuickCull
 
-A native macOS app for fast photo culling. It decodes RAWs from every major camera maker plus JPEG, PNG and HEIC into full-resolution previews, lets you scrub with the arrow keys, flag with three colors, filter by color, and move the flagged ones to Trash or another folder.
+Fast photo culling for macOS — scrub RAWs with the arrow keys, flag keepers in three colors, trash or move the rest.
 
-Download the latest release from [Releases](https://github.com/edrickt/quickcull/releases/latest) — a universal app for macOS 14 or later, Apple silicon or Intel. Install steps are below; `docs/archive/specs/` holds the per-feature design history.
+[![Release](https://img.shields.io/github/v/release/edrickt/quickcull)](https://github.com/edrickt/quickcull/releases/latest) ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-## Highlights
+![QuickCull — single, split, and grid views](docs/assets/screenshot-main.png)
 
-- **True RAW histogram, not a preview.** FastRawViewer-style linear counts taken before white balance and gamma. Each Bayer photosite counts once by color, so R is about 1/4 of pixels, G about 1/2, B about 1/4. Sensor maximum is recorded per camera (for example 4095 on CR2/NEF, 16383 on CR3). You see clipping percent, mean, and overall luminance in two 72pt log-y panels. X-Trans and Fuji super-CCD fall back to a rendered 255 histogram (computed from a 1024px sample, not the full-resolution bitmap).
-- **Decode first, scrub without waiting.** LibRaw demosaics every RAW at full resolution, ImageIO handles JPEG, PNG and HEIC, everything lands as a q75 JPEG in the local cache. The app finishes decoding before you can scrub, so the arrow keys never stall on a decode.
-- **Memory stays flat.** The viewer decodes the current image plus −5/+10 at full resolution — so the Space loupe is true source-pixel 1:1 at any image size and scrubbing within the tier is instant — while the rest of the −10/+20 window pre-loads at half size (DCT-subsampled, ~4× less memory) and upgrades to full-res the moment you land on it. Both the viewer window and the thumbnails are bounded by the surface that shows them, never by shoot size: the strip pre-loads the current ±30 and keeps at most 81 × 320px thumbnails (61 in the pre-load window plus the 20 cells you scrolled to), and the grid keeps exactly the tiles in view. Where the loupe lands on a half-size placeholder it says `preview` instead of claiming 100%. Thumbnail and display decodes are throttled, and a superseded decode is cancelled, so a fast scrub or a grid fill can never fire hundreds at once. 16 full-res + 15 half-size 20MP images ≈ 1.2GB when the window is fresh, rising to ≈1.7GB once you have scrubbed across it (a visited image stays full-res; ~3.6GB at 45MP), tunable with `defaults write com.quickcull.app displayFullResBehind N` and `defaults write com.quickcull.app displayFullResAhead N` (clamped to the window extent).
-- **Three ways to look.** Single shows one image fit to window. Split shows current and next side by side with an 8pt gap and no divider, and both panes share the same zoom and pan. Grid shows a wall of 160x108pt tiles in adaptive 160-200pt columns opening at the current photo, selection by file id so it survives filters, and batch flag with Z/X/C (with nothing selected, a flag key does nothing).
-- **Metadata where you need it.** A 240pt sidebar slides in without covering the image. It shows file name and path, dimensions, file size, camera and lens, ISO, aperture, shutter, focal length, date taken, exposure bias and white balance, plus the histogram above the rows.
-- **Titles under every thumb.** Each filmstrip and grid thumbnail shows the file name, single line, tail truncated, with the full name in a tooltip.
-- **Three colors, not one flag.** `Z` is red, `X` is yellow, `C` is green. Each photo holds at most one color; hit the same key to clear it, hit a different key to replace it. The badge is a corner triangle tinted to match. Filter to All, R, Y, G, or Unflagged with live counts. Trash and Move are dropdown menus with per-color choices (R, Y, G, All Flagged) that disable when that color has nothing flagged or while a commit is running. Move picks a folder each time with a system picker, moves flat, and auto-renames to `name 1.ext` when the destination exists. Grid batch works too: select a few thumbs and `Z` turns them all red at once.
-- **Zoom and pan that track your fingers.** Pinch 1x to 4x, double-click to toggle fit and 2x, drag to pan when zoomed, two-finger scroll pans synchronously and only when the cursor is over that pane. No async tick, no dead zone, no animation lag. Pan is clamped so the image never leaves the viewport.
-
-## Install
+## Download
 
 **Requirements:** macOS 14 (Sonoma) or later, Apple silicon or Intel. Nothing else to install — LibRaw ships inside the app.
 
-**Download.** Take the `QuickCull-…-macOS-universal.zip` asset from [Releases](https://github.com/edrickt/quickcull/releases/latest), unzip it, and drag `QuickCull.app` into `/Applications`.
+Take the `QuickCull-…-macOS-universal.zip` asset from [Releases](https://github.com/edrickt/quickcull/releases/latest), unzip it, and drag `QuickCull.app` into `/Applications`.
 
 QuickCull is ad-hoc signed, not notarized, so macOS refuses the first launch as an unverified developer. Approve it once:
 
@@ -44,8 +35,8 @@ The build compiles LibRaw 0.22.1 into `Build/libraw/` the first time, which take
 
 1. **Select photos.** Multi-select in the file picker. Unsupported formats appear in a dismissible banner instead of quietly disappearing from the count.
 2. **Decode all.** RAWs go through LibRaw at full resolution, standard formats through ImageIO with EXIF orientation baked in. The cache holds full-resolution q75 JPEGs. Scrubbing is blocked until every file is decoded.
-3. **Scrub.** Step with the keyboard. The current image decodes at full resolution first (the −5/+10 tier pre-loads full-res; the outer window ring pre-loads half-size and upgrades the moment you land on it); hold `Space` at fit for the 100% loupe — genuine source-pixel 1:1 at any image size.
-4. **Flag and commit.** Tap `Z`/`X`/`C` to flag red/yellow/green, filter to `R`/`Y`/`G`/`Unflagged` if you want to review just that color, then pick Trash or Move from its dropdown and choose a color or All Flagged. Files that fail stay flagged so you can retry. `File > New Session` (⇧⌘N) wipes flags and the cache and returns to the importer.
+3. **Scrub.** Step with the keyboard; hold `Space` at fit for the 100% loupe — genuine source-pixel 1:1 at any image size.
+4. **Flag and commit.** Tap `Z`/`X`/`C` to flag red/yellow/green, filter if you want to review just one color, then pick Trash or Move from its dropdown and choose a color or All Flagged. Files that fail stay flagged so you can retry. `File > New Session` (⇧⌘N) wipes flags and the cache and returns to the importer.
 
 ## Supported formats
 
