@@ -6,6 +6,8 @@ Fast photo culling for macOS — scrub RAWs with the arrow keys, flag keepers in
 
 ![QuickCull — single, split, and grid views](docs/assets/screenshot-main.png)
 
+- [Download](#download) · [How it works](#how-it-works) · [Highlights](#highlights) · [Supported formats](#supported-formats) · [Controls](#controls) · [For developers](#for-developers) · [Licensing](#licensing) · [Out of scope for v1](#out-of-scope-for-v1)
+
 ## Download
 
 **Requirements:** macOS 14 (Sonoma) or later, Apple silicon or Intel. Nothing else to install — LibRaw ships inside the app.
@@ -66,20 +68,22 @@ Standard formats decoded with ImageIO: JPEG (JPG, JPEG), PNG, HEIC and HEIF. Ori
 
 Flags are exclusive — red, yellow, green, or unflagged. In grid, `Z`/`X`/`C` apply to the selection; with no selection they do nothing. Filter with `All` + `R`/`Y`/`G`/Unflagged segments, then Trash or Move per color (or All Flagged) from the two dropdowns. Failed files keep their color so you can retry. Click a filmstrip thumb to jump; in grid, click/Cmd-click/Shift-click to select, double-click to open in single.
 
-## Run
+## For developers
+
+### Run
 
 For the development loop, from a checkout:
 
     Scripts/start.sh   # builds Release and launches, quitting any running instance first
     Scripts/stop.sh    # quits the app
 
-To keep a copy in Applications, use [Install](#install) instead.
+To keep a copy in Applications, use [Download](#download) instead.
 
-## Cache
+### Cache
 
 Decoded photos are full-resolution q75 JPEGs in `~/Library/Application Support/QuickCull/cache`, keyed by file path, size and modification time. The cache is wiped on launch and on quit (a forced quit is covered by the next launch), so each session decodes from the originals.
 
-## Repository layout
+### Repository layout
 
     QuickCull/          app target: SwiftUI/AppKit views only
     QuickCullCore/      all logic (App, Commit, Decoding, Engine, Keys,
@@ -90,14 +94,14 @@ Decoded photos are full-resolution q75 JPEGs in `~/Library/Application Support/Q
     Scripts/            build, install, fixtures, benchmarks (see Scripts/README.md)
     docs/               index + assets; archive/ holds executed plans, specs, audits
 
-## Build
+### Build
 
 Requires Xcode 16 or later on macOS 14 or later. The first build downloads and compiles LibRaw 0.22.1 into `Build/libraw/` automatically as a universal arm64 plus x86_64 dylib. A clean rebuild takes a few minutes.
 
     xcodebuild -project QuickCull.xcodeproj -scheme QuickCull build
     # or: ./Scripts/install.sh  — builds and copies to /Applications/QuickCull.app
 
-## Test
+### Test
 
 Build the test bundle, then run it directly with `xcrun xctest`:
 
@@ -109,7 +113,7 @@ Build the test bundle, then run it directly with `xcrun xctest`:
 
 264 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
 
-### Fixtures
+#### Fixtures
 
 `QuickCullCoreTests/Fixtures/raws/` holds pinned raw samples covering the major brands (Canon, Nikon, Sony, Fujifilm, Olympus, Panasonic, Pentax), plus deliberately truncated files for error-path tests. Regenerate or restore them with:
 
