@@ -2,17 +2,17 @@
 
 # QuickCull
 
-Fast photo culling for macOS — scrub RAWs with the arrow keys, flag keepers in three colors, trash or move the rest.
+Fast photo culling for macOS. Scrub RAWs with the arrow keys, flag keepers in three colors, trash or move the rest.
 
 [![Release](https://img.shields.io/github/v/release/edrickt/quickcull)](https://github.com/edrickt/quickcull/releases/latest) ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-<!-- Screenshot: docs/assets/screenshot-main.png — capture pending -->
+<!-- Screenshot: docs/assets/screenshot-main.png, capture pending -->
 
 - [Download](#download) · [How it works](#how-it-works) · [Highlights](#highlights) · [Supported formats](#supported-formats) · [Controls](#controls) · [For developers](#for-developers) · [Licensing](#licensing) · [Out of scope for v1](#out-of-scope-for-v1)
 
 ## Download
 
-**Requirements:** macOS 14 (Sonoma) or later, Apple silicon or Intel. Nothing else to install — LibRaw ships inside the app.
+**Requirements.** macOS 14 (Sonoma) or later, Apple silicon or Intel. Nothing else to install. LibRaw ships inside the app.
 
 Take the `QuickCull-…-macOS-universal.zip` asset from [Releases](https://github.com/edrickt/quickcull/releases/latest), unzip it, and drag `QuickCull.app` into `/Applications`.
 
@@ -39,7 +39,7 @@ The build compiles LibRaw 0.22.1 into `Build/libraw/` the first time, which take
 
 1. **Select photos.** Multi-select in the file picker. Unsupported formats appear in a dismissible banner instead of quietly disappearing from the count.
 2. **Decode all.** RAWs go through LibRaw at full resolution, standard formats through ImageIO with EXIF orientation baked in. The cache holds full-resolution q75 JPEGs. Scrubbing is blocked until every file is decoded.
-3. **Scrub.** Step with the keyboard; hold `Space` at fit for the 100% loupe — genuine source-pixel 1:1 at any image size.
+3. **Scrub.** Step with the keyboard. Hold `Space` at fit for the 100% loupe. It shows genuine source-pixel 1:1 at any image size.
 4. **Flag and commit.** Tap `Z`/`X`/`C` to flag red/yellow/green, filter if you want to review just one color, then pick Trash or Move from its dropdown and choose a color or All Flagged. Files that fail stay flagged so you can retry. `File > New Session` (⇧⌘N) wipes flags and the cache and returns to the importer.
 
 ## Highlights
@@ -49,7 +49,7 @@ The build compiles LibRaw 0.22.1 into `Build/libraw/` the first time, which take
 - **Stays responsive on big shoots.** Pre-loads around the current photo and shows true 1:1 pixels in the `Space` loupe.
 - **Three ways to look.** Single, side-by-side split with shared zoom and pan, and a grid with batch flagging.
 - **Metadata where you need it.** Sliding sidebar with camera, lens, exposure, plus file name under every thumbnail.
-- **Three colors, not one flag.** `Z` red, `X` yellow, `C` green — exclusive, same key clears; filter by color, then Trash or Move per color.
+- **Three colors, not one flag.** `Z` red, `X` yellow, `C` green. They are exclusive, same key clears. Filter by color, then Trash or Move per color.
 
 ## Supported formats
 
@@ -68,7 +68,7 @@ Standard formats decoded with ImageIO: JPEG (JPG, JPEG), PNG, HEIC and HEIF. Ori
 | `C` | Toggle green flag; replaces red or yellow |
 | `Space` (hold) | 100% loupe at fit: true 1:1 source pixels under the cursor |
 
-Flags are exclusive — red, yellow, green, or unflagged. In grid, `Z`/`X`/`C` apply to the selection; with no selection they do nothing. Filter with `All` + `R`/`Y`/`G`/Unflagged segments, then Trash or Move per color (or All Flagged) from the two dropdowns. Failed files keep their color so you can retry. Click a filmstrip thumb to jump; in grid, click/Cmd-click/Shift-click to select, double-click to open in single.
+Flags are exclusive, with red, yellow, green, or unflagged states. In grid, `Z`/`X`/`C` apply to the selection; with no selection they do nothing. Filter with `All` + `R`/`Y`/`G`/Unflagged segments, then Trash or Move per color (or All Flagged) from the two dropdowns. Failed files keep their color so you can retry. Click a filmstrip thumb to jump; in grid, click/Cmd-click/Shift-click to select, double-click to open in single.
 
 ## For developers
 
@@ -101,7 +101,7 @@ Decoded photos are full-resolution q75 JPEGs in `~/Library/Application Support/Q
 Requires Xcode 16 or later on macOS 14 or later. The first build downloads and compiles LibRaw 0.22.1 into `Build/libraw/` automatically as a universal arm64 plus x86_64 dylib. A clean rebuild takes a few minutes.
 
     xcodebuild -project QuickCull.xcodeproj -scheme QuickCull build
-    # or: ./Scripts/install.sh  — builds and copies to /Applications/QuickCull.app
+    # or ./Scripts/install.sh to build and copy to /Applications/QuickCull.app
 
 ### Test
 
