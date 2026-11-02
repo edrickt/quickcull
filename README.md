@@ -1,16 +1,20 @@
-<img src="docs/assets/app-icon.png" alt="QuickCull app icon" width="128">
+<p align="center">
+  <img src="docs/assets/app-icon.png" width="128" alt="QuickCull app icon">
+</p>
 
 # QuickCull
 
 Fast photo culling for macOS. Scrub RAWs with the arrow keys, flag keepers in three colors, trash or move the rest.
 
+**1.0.2 · macOS 14+ · Apple Silicon + Intel · MIT**
+
 [![Release](https://img.shields.io/github/v/release/edrickt/quickcull)](https://github.com/edrickt/quickcull/releases/latest) ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
 <!-- Screenshot: docs/assets/screenshot-main.png, capture pending -->
 
-- [Download](#download) · [How it works](#how-it-works) · [Highlights](#highlights) · [Supported formats](#supported-formats) · [Controls](#controls) · [For developers](#for-developers) · [Licensing](#licensing) · [Out of scope for v1](#out-of-scope-for-v1)
+- [Install](#install) · [How it works](#how-it-works) · [Features](#features) · [Supported formats](#supported-formats) · [Controls](#controls) · [For developers](#for-developers) · [License](#license) · [Out of scope for v1](#out-of-scope-for-v1)
 
-## Download
+## Install
 
 **Requirements.** macOS 14 (Sonoma) or later, Apple silicon or Intel. Nothing else to install. LibRaw ships inside the app.
 
@@ -42,7 +46,7 @@ The build compiles LibRaw 0.22.1 into `Build/libraw/` the first time, which take
 3. **Scrub.** Step with the keyboard. Hold `Space` at fit for the 100% loupe. It shows genuine source-pixel 1:1 at any image size.
 4. **Flag and commit.** Tap `Z`/`X`/`C` to flag red/yellow/green, filter if you want to review just one color, then pick Trash or Move from its dropdown and choose a color or All Flagged. Files that fail stay flagged so you can retry. `File > New Session` (⇧⌘N) wipes flags and the cache and returns to the importer.
 
-## Highlights
+## Features
 
 - **True RAW histogram.** Linear counts before white balance and gamma, with clipping percent, mean, and luminance.
 - **Decode first, scrub without waiting.** Every file decoded up front at full resolution, so the arrow keys never stall.
@@ -79,7 +83,7 @@ For the development loop, from a checkout:
     Scripts/start.sh   # builds Release and launches, quitting any running instance first
     Scripts/stop.sh    # quits the app
 
-To keep a copy in Applications, use [Download](#download) instead.
+To keep a copy in Applications, use [Install](#install) instead.
 
 ### Cache
 
@@ -123,7 +127,7 @@ Build the test bundle, then run it directly with `xcrun xctest`:
 
 It downloads from the public sample sources and checks each file against its pinned sha256.
 
-## Licensing
+## License
 
 QuickCull is MIT-licensed. See [`LICENSE`](LICENSE).
 
