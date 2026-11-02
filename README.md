@@ -1,3 +1,5 @@
+<img src="docs/assets/app-icon.png" alt="QuickCull app icon" width="128">
+
 # QuickCull
 
 Fast photo culling for macOS — scrub RAWs with the arrow keys, flag keepers in three colors, trash or move the rest.
