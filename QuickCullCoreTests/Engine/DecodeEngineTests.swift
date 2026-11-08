@@ -155,7 +155,9 @@ final class DecodeEngineTests: XCTestCase {
                       "all fixture files must decode: \(outcomes)")
         let contents = try FileManager.default.contentsOfDirectory(atPath: base.path)
         XCTAssertEqual(contents.filter { $0.hasSuffix(".jpg") }.count, 8)
-        // FastRawViewer RAW: 7 Bayer fixtures produce a raw histogram; fuji_e550 (super-CCD/X-Trans) returns nil
+        // FastRawViewer RAW: 7 Bayer fixtures produce a raw histogram; fuji_e550
+        // is a super-CCD (non-Bayer) sample. X-Trans/Fovea share the same nil
+        // path but have no fixture.
         XCTAssertEqual(contents.filter { $0.hasSuffix(".hist.json") }.count, 7)
     }
 
@@ -190,19 +192,19 @@ final class DecodeEngineTests: XCTestCase {
     }
 
     func testDecodeOptionsV1IsDefaultAndSourceCompatible() throws {
-        let bundleURL = try XCTUnwrap(Bundle(for: Self.self).resourceURL)
-        let canonURL = bundleURL.appendingPathComponent("Fixtures/raws/canon_eos6d.cr2")
-        let url: URL
-        if FileManager.default.fileExists(atPath: canonURL.path) {
-            url = canonURL
-        } else {
-            url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "img_0062", withExtension: "cr2", subdirectory: "Fixtures/raws"))
-        }
+        // The old call shape (`decodeRaw(at:)`) must produce the same pixels as
+        // the explicit `.v1` options, not merely the same dimensions.
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "img_0062",
+                                                          withExtension: "cr2",
+                                                          subdirectory: "Fixtures/raws"))
         let decoder = LibRawDecoder()
         let a = try decoder.decodeRaw(at: url) // old signature
         let b = try decoder.decodeRaw(at: url, options: .v1) // new signature
         XCTAssertEqual(a.width, b.width)
         XCTAssertEqual(a.height, b.height)
+        let dataA = try XCTUnwrap(a.image.dataProvider?.data as Data?)
+        let dataB = try XCTUnwrap(b.image.dataProvider?.data as Data?)
+        XCTAssertEqual(dataA, dataB)
     }
 
     /// A decoder that finishes the first file last, so completion order differs

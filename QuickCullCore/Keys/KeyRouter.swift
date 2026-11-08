@@ -56,4 +56,23 @@ public enum KeyRouter {
         guard let action = CullKeyMap.action(forKeyCode: keyCode) else { return .passthrough }
         return .handle(action)
     }
+
+    /// Whether the app-wide Space monitor should treat a Space press as the
+    /// 100% loupe (and consume it), or leave it to the system.
+    ///
+    /// `canActivateLoupe` is the same predicate `AppState.setLoupeActive`
+    /// enforces, so Space is only taken where the loupe can actually start:
+    /// scrubbing with a rendered image, not the grid, not a filtered-empty
+    /// placeholder, and not while a commit or move is in flight. Anywhere else
+    /// Space belongs to the focused control or the scroll view.
+    public static func consumesLoupeSpace(hasCommand: Bool,
+                                          hasControl: Bool,
+                                          hasOption: Bool,
+                                          systemOwnsKeys: Bool,
+                                          canActivateLoupe: Bool) -> Bool {
+        guard canActivateLoupe else { return false }
+        guard !hasCommand, !hasControl, !hasOption else { return false }
+        guard !systemOwnsKeys else { return false }
+        return true
+    }
 }

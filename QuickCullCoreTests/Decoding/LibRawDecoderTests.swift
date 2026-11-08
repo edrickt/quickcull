@@ -70,8 +70,9 @@ final class LibRawDecoderTests: XCTestCase {
 
     func testHistogramComputedForRawFixtures() throws {
         // FastRawViewer-style: linear Bayer histogram before demosaic.
-        // 7 Bayer fixtures have a raw histogram; fuji_e550 (super-CCD/X-Trans)
-        // returns nil and falls back to DisplayHistogram in the UI.
+        // 7 Bayer fixtures have a raw histogram; fuji_e550 is a super-CCD
+        // (non-Bayer) sample and returns nil, falling back to DisplayHistogram
+        // in the UI. No X-Trans fixture exists; that guard is defensive.
         let cases: [(name: String, ext: String)] = [
             ("img_0062", "cr2"), ("mg_2233", "cr3"), ("dsc8140", "nef"), ("dsc0258", "arw"),
             ("olympus_c5050z", "orf"), ("p1000336", "rw2"), ("pentax_k01", "dng"),
@@ -96,7 +97,7 @@ final class LibRawDecoderTests: XCTestCase {
             XCTAssertEqual(Double(hist.samples[1]), quarter * 2, accuracy: quarter * 0.04, "\(c.name) G ~1/2")
         }
         let fuji = try decoder.decodeRaw(at: fixture("fuji_e550","raf"))
-        XCTAssertNil(fuji.histogram, "super-CCD/X-Trans has no Bayer raw histogram — UI falls back to DisplayHistogram")
+        XCTAssertNil(fuji.histogram, "non-Bayer sensor has no Bayer raw histogram; UI falls back to DisplayHistogram")
     }
 
     /// The sensor maximum is per camera, and the histogram normalizes by it. A
@@ -127,9 +128,11 @@ final class LibRawDecoderTests: XCTestCase {
         }
     }
 
-    func testSuperCCDAndXTransNowHaveHistogram() throws {
+    func testSuperCCDFallsBackToTheRenderedHistogram() throws {
         let fuji = try decoder.decodeRaw(at: fixture("fuji_e550","raf"))
-        XCTAssertNil(fuji.histogram, "super-CCD/X-Trans returns nil raw histogram; DisplayHistogram fallback used in UI")
+        // The fixture set has a super-CCD (non-Bayer) sample, not an X-Trans
+        // one; the decoder's nil path covers X-Trans/Fovea/monochrome too.
+        XCTAssertNil(fuji.histogram, "non-Bayer sensors return nil raw histogram; DisplayHistogram fallback used in UI")
         // Fallback is rendered: verify DisplayHistogram still works for its CGImage.
         // It samples a downscaled copy (see `maxSampleEdge`), so the absolute
         // count is the sampled pixel count; the invariant is that every sampled
@@ -145,26 +148,20 @@ final class LibRawDecoderTests: XCTestCase {
     }
 
     func testLibRawDecoderProducesIdenticalPixelsAcrossDecodes() throws {
-        // Use a real fixture via LibRawDecoder; decode twice and compare pixel hashes
-        let bundleURL = try XCTUnwrap(Bundle(for: Self.self).resourceURL)
-        let canonURL = bundleURL.appendingPathComponent("Fixtures/raws/canon_eos6d.cr2")
-        let fallbackURL = bundleURL.appendingPathComponent("Fixtures/raws/img_0062.cr2")
-        let url: URL
-        if FileManager.default.fileExists(atPath: canonURL.path) {
-            url = canonURL
-        } else {
-            url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "img_0062", withExtension: "cr2", subdirectory: "Fixtures/raws"))
-            // sanity: ensure fallback exists
-            XCTAssertTrue(FileManager.default.fileExists(atPath: fallbackURL.path) || FileManager.default.fileExists(atPath: url.path))
-        }
+        // Decoding the same file twice must be byte-identical: the cache key
+        // is path/size/mtime based, so a nondeterministic decode would make a
+        // re-import silently overwrite a preview with different pixels. The
+        // whole buffer is compared, not a prefix: a 1 KB prefix cannot see
+        // nondeterminism that starts later in the frame.
+        let url = fixture("img_0062", "cr2")
         let decoder = LibRawDecoder()
         let a = try decoder.decodeRaw(at: url)
         let b = try decoder.decodeRaw(at: url)
         XCTAssertEqual(a.width, b.width)
         XCTAssertEqual(a.height, b.height)
-        // Compare first 1k bytes of CGImage data via provider copy
-        let dataA = a.image.dataProvider?.data as Data?
-        let dataB = b.image.dataProvider?.data as Data?
-        XCTAssertEqual(dataA?.prefix(1024), dataB?.prefix(1024))
+        let dataA = try XCTUnwrap(a.image.dataProvider?.data as Data?)
+        let dataB = try XCTUnwrap(b.image.dataProvider?.data as Data?)
+        XCTAssertEqual(dataA.count, a.width * a.height * 3)
+        XCTAssertEqual(dataA, dataB)
     }
 }

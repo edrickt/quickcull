@@ -1,6 +1,9 @@
 # Scripts
 
-One script per job. All run from the repo root.
+One script per job. Examples below are relative to the repo root.
+`start.sh`, `stop.sh`, `install.sh` and `gen-compile-db.sh` resolve the
+root themselves; `bench-decode.sh` and the `verify-*.swift` scripts expect
+to be invoked from the repo root.
 
 - `start.sh` quits any running instance, builds Release, and launches the app.
   The daily development loop.

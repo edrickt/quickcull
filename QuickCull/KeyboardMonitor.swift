@@ -32,12 +32,17 @@ final class KeyboardMonitor {
         // didResignActive/didResignKey observers (a keyUp may never arrive).
         loupeToken = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             guard event.keyCode == 49 else { return event }
-            guard !Self.systemOwnsKeys else { return event }
-            // A chord involving Space belongs to the system (Cmd+Space, and
-            // Control+Space's input-source switch): the loupe is a bare key.
-            guard event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else {
-                return event
-            }
+            let flags = event.modifierFlags
+            // Space is the loupe only when the loupe can start; the same
+            // predicate AppState.setLoupeActive enforces decides that, so the
+            // key is never swallowed for a loupe that cannot appear.
+            guard KeyRouter.consumesLoupeSpace(
+                hasCommand: flags.contains(.command),
+                hasControl: flags.contains(.control),
+                hasOption: flags.contains(.option),
+                systemOwnsKeys: Self.systemOwnsKeys,
+                canActivateLoupe: appState.canActivateLoupe
+            ) else { return event }
             if event.type == .keyDown, event.isARepeat { return nil }
             let isDown = event.type == .keyDown
             Task { @MainActor in appState.setLoupeActive(isDown) }

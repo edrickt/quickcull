@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # QuickCull start script: quits any running instance, builds (Release), launches.
 #
-# Usage: ./start.sh
+# Usage: ./Scripts/start.sh
 #
 # In sandboxed environments (e.g. the DSH harness) the Swift macro compiler
 # needs the sandbox disabled; the script detects that case automatically.
 # On a normal Mac it builds with plain xcodebuild.
 set -euo pipefail
-cd "$(dirname "$0")"
+# Repo root: this script lives in Scripts/ but builds with paths relative to the
+# project, so it must run from the root the README documents.
+cd "$(dirname "$0")/.."
 
 APP="Build/Release/Build/Products/Release/QuickCull.app"
 

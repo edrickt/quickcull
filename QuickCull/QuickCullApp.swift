@@ -37,14 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Deletes the cache, but never holds the quit open longer than a few
     /// seconds: a hung volume must not turn Quit into a freeze, and the launch
-    /// wipe covers whatever is left.
+    /// wipe covers whatever is left. A wipe still running when the deadline
+    /// wins is abandoned, not awaited (see `AsyncTimeout`).
     private static func wipe(_ cache: ImageCacheStore, timeout: Double = 5) async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { try? await cache.wipe() }
-            group.addTask { try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000)) }
-            await group.next()
-            group.cancelAll()
-        }
+        await AsyncTimeout.run(seconds: timeout) { try? await cache.wipe() }
     }
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # QuickCull stop script: gracefully quits the running app.
 #
-# Usage: ./stop.sh
+# Usage: ./Scripts/stop.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 

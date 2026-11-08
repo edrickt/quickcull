@@ -165,13 +165,26 @@ public final class AppState {
         transitionToEmptySession()
     }
 
+    /// True when the Space loupe can start right now.
+    ///
+    /// Single source of truth for `setLoupeActive` and the app-wide key
+    /// monitor: the session must be on screen with a rendered image (not the
+    /// grid, not a filtered-empty placeholder) and no commit or move may be in
+    /// flight. Space is only consumed where this is true; everywhere else it
+    /// belongs to the focused control or scroll view.
+    public var canActivateLoupe: Bool {
+        phase == .scrubbing
+            && !isMoving
+            && !isCommitting
+            && viewMode != .grid
+            && !(session?.files.isEmpty ?? true)
+    }
+
     public func setLoupeActive(_ active: Bool) {
-        guard phase == .scrubbing, !isMoving, !isCommitting else {
+        guard canActivateLoupe else {
             if isLoupeActive { isLoupeActive = false }
             return
         }
-        // Don't show loupe in Grid
-        if viewMode == .grid, active { return }
         isLoupeActive = active
     }
 
