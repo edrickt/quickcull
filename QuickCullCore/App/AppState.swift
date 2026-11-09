@@ -9,6 +9,18 @@ public enum AppPhase: Equatable {
     case scrubbing
 }
 
+/// Progress of an import that is still decoding after culling opened (see
+/// `AppState.backgroundDecodeProgress`).
+public struct ImportProgress: Equatable, Sendable {
+    public let completed: Int
+    public let total: Int
+
+    public init(completed: Int, total: Int) {
+        self.completed = completed
+        self.total = total
+    }
+}
+
 /// Central app state: session phases, import pipeline, commit orchestration,
 /// and the sliding windows. All UI observes this one object.
 @MainActor
@@ -25,6 +37,21 @@ public final class AppState {
     private var gridAnchorID: String?
     public private(set) var session: Session?
     public private(set) var importFailures: [DecodeOutcome] = []
+    /// Failure ids the user already dismissed from the banner. The import can
+    /// surface failures again while it keeps decoding, and at its completed
+    /// event; a later failure must not resurrect ones already acknowledged.
+    private var dismissedImportFailureIDs: Set<String> = []
+    /// Non-nil while the import is still decoding files after the scrub view
+    /// already opened: `earlyViewThreshold` full-size previews are cached and
+    /// the rest are still landing. Photos whose preview has not landed show
+    /// the viewer's loading state, and each landed decode refreshes its slots.
+    public private(set) var backgroundDecodeProgress: ImportProgress?
+    /// How many full-size previews must be cached before culling opens. The
+    /// rest of the shoot keeps decoding behind the scrub view, so a long
+    /// import no longer blocks the first photo behind every other file. A
+    /// shoot at or below this size waits for every file (the previous
+    /// behavior).
+    public let earlyViewThreshold: Int
     public private(set) var commitFailures: [TrashOutcome] = []
     /// Bumped once per completed commit, so the UI can announce a failure even
     /// when the count is unchanged (two commits failing on one file each).
@@ -86,11 +113,13 @@ public final class AppState {
                                                       imageIODecoder: ImageIODecoder()),
                 cache: ImageCacheStore = ImageCacheStore(baseURL: ImageCacheStore.defaultBaseURL()),
                 trasher: Trashing = FileManagerTrasher(),
-                mover: Moving = FileManagerMover()) {
+                mover: Moving = FileManagerMover(),
+                earlyViewThreshold: Int = 50) {
         self.decoder = decoder
         self.cache = cache
         self.trasher = trasher
         self.mover = mover
+        self.earlyViewThreshold = max(1, earlyViewThreshold)
     }
 
     /// Launch-time authoritative cache cleanup (leftovers from crashes
@@ -133,6 +162,7 @@ public final class AppState {
         thumbWindow = nil
         gridThumbs = nil
         displayImages = nil
+        backgroundDecodeProgress = nil
         viewMode = .scrub
         phase = .empty
     }
@@ -188,8 +218,12 @@ public final class AppState {
         isLoupeActive = active
     }
 
-    /// Import: validate + dedupe, then Phase 1 (decode everything), then scrub.
+    /// Import: validate + dedupe, then decode. Culling opens as soon as
+    /// `earlyViewThreshold` full-size previews are cached; the rest of the
+    /// shoot keeps decoding behind the scrub view (`backgroundDecodeProgress`)
+    /// and fills in as it lands.
     public func importFiles(urls: [URL]) {
+        dismissedImportFailureIDs = []
         viewMode = .scrub
         gridSelection = []
         gridAnchorID = nil
@@ -229,43 +263,163 @@ public final class AppState {
                                  error: .cannotOpen(ImportFailureSummary.unsupportedMessage)) }
         session = Session(files: files)
         sessionGeneration += 1
+        let generation = sessionGeneration
         importFailures = []
         commitFailures = []
         resetTransientState()
         phase = .decoding(completed: 0, total: files.count)
+        backgroundDecodeProgress = nil
 
         let engine = DecodeEngine(decoder: decoder, cache: cache, options: decodeOptions)
         importTask?.cancel()
+        // A shoot at or below the threshold has nothing to gain from opening
+        // early: "threshold reached" would already be "all decoded".
+        let earlyViewAt = earlyViewThreshold < files.count ? earlyViewThreshold : nil
+        // Failure banner order: decode completion order is nondeterministic,
+        // but the same import must name its failures in the same order.
+        var inputOrder: [String: Int] = [:]
+        inputOrder.reserveCapacity(files.count)
+        for (index, file) in files.enumerated() { inputOrder[file.id] = index }
+
         importTask = Task {
+            var succeeded = 0
+            var processed = 0
+            var failures: [DecodeOutcome] = []
+            var failedIDs: Set<String> = []
+            var isViewing = false
+
             for await event in await engine.decodeAll(files: files) {
-                if Task.isCancelled { break }
+                if Task.isCancelled || generation != sessionGeneration { break }
                 switch event {
-                case .progress(let completed, let total):
-                    phase = .decoding(completed: completed, total: total)
-                case .completed(let outcomes):
-                    importFailures = unsupportedFailures + outcomes.filter { $0.error != nil }
-                    let failed = outcomes.filter { $0.error != nil }.map(\.file)
-                    if !failed.isEmpty {
-                        // Spec: the session proceeds without the failed files.
-                        // Flags are empty at this point, so remove() only
-                        // drops the files (and shifts the index correctly).
-                        session?.remove(failed)
-                        if let s = session {
-                            gridSelection = gridSelection.filter { s.contains(id: $0) }
+                case .fileCompleted(let outcome):
+                    if outcome.error != nil {
+                        // A file the user already trashed or moved while the
+                        // import was still running is not a decode failure to
+                        // report, and it is already out of the session.
+                        guard let live = session, live.contains(id: outcome.file.id) else { break }
+                        failedIDs.insert(outcome.file.id)
+                        failures.append(outcome)
+                        guard isViewing else { break }
+                        // Mid-import failures must not sit behind a permanent
+                        // spinner in the viewer: drop the file now, re-map the
+                        // windows (they are position-addressed) and say so.
+                        removeFilesWithoutPreviews([outcome.file])
+                        if let live = session { installWindows(for: live.files) }
+                        surfaceImportFailures(failures, unsupported: unsupportedFailures,
+                                              order: inputOrder)
+                    } else {
+                        succeeded += 1
+                        if isViewing {
+                            if FileManager.default.fileExists(atPath: outcome.file.url.path) {
+                                refreshPreview(id: outcome.file.id)
+                            } else {
+                                // The user trashed or moved this file while its
+                                // decode was in flight. The preview it just
+                                // wrote recomputed the cache key after the file
+                                // was gone, so the commit's discard cannot have
+                                // removed it.
+                                discardCachedPreview(at: outcome.previewURL)
+                            }
+                        } else if let threshold = earlyViewAt, succeeded >= threshold {
+                            // The threshold is met: open the scrub view now and
+                            // keep decoding the rest behind it.
+                            let failedSoFar = failures.map(\.file)
+                            if !failedSoFar.isEmpty { removeFilesWithoutPreviews(failedSoFar) }
+                            if let live = session {
+                                surfaceImportFailures(failures, unsupported: unsupportedFailures,
+                                                      order: inputOrder)
+                                installWindows(for: live.files)
+                                phase = .scrubbing
+                                isViewing = true
+                                backgroundDecodeProgress = ImportProgress(
+                                    completed: processed, total: files.count)
+                            }
                         }
                     }
-                    if session?.totalCount == 0 {
-                        // All failed: back to the empty state; its banner
-                        // surfaces the failures.
+                case .progress(let completed, let total):
+                    processed = completed
+                    if isViewing {
+                        backgroundDecodeProgress = ImportProgress(completed: completed, total: total)
+                    } else {
+                        phase = .decoding(completed: completed, total: total)
+                    }
+                case .completed(let outcomes):
+                    backgroundDecodeProgress = nil
+                    if !isViewing {
+                        // Spec: the session proceeds without the failed files.
+                        // The failures were tracked as they landed; remove them
+                        // all at once so the window is installed over the
+                        // post-removal list.
+                        removeFilesWithoutPreviews(
+                            outcomes.compactMap { failedIDs.contains($0.file.id) ? $0.file : nil })
+                    }
+                    surfaceImportFailures(failures, unsupported: unsupportedFailures,
+                                          order: inputOrder)
+                    if let live = session {
+                        if isViewing {
+                            // Retarget onto the post-removal list; already
+                            // decoded images survive.
+                            installWindows(for: live.files)
+                        } else {
+                            finishDecoding(files: live.files)
+                        }
+                    } else if phase != .empty {
+                        // All failed: the banner surfaces the failures.
                         transitionToEmptySession()
-                    } else if let session {
-                        // Loaders index into the files array, so it must be
-                        // the post-removal list.
-                        finishDecoding(files: session.files)
                     }
                 }
             }
         }
+    }
+
+    /// Removes files whose full-size preview could not be cached, so the
+    /// session never keeps a slot that can never render. A session that loses
+    /// every file returns to the empty state (its banner names the failures).
+    private func removeFilesWithoutPreviews(_ files: [SessionFile]) {
+        guard !files.isEmpty, let session else { return }
+        session.remove(files)
+        gridSelection = gridSelection.filter { session.contains(id: $0) }
+        if session.totalCount == 0 { transitionToEmptySession() }
+    }
+
+    /// Decode failures reach the banner in completion order; re-sort them into
+    /// the import's order so the same import reports the same banner. Failures
+    /// the user already dismissed stay dismissed: the banner is re-surfaced as
+    /// the background decode finds more failures.
+    private func surfaceImportFailures(_ failures: [DecodeOutcome],
+                                       unsupported: [DecodeOutcome],
+                                       order: [String: Int]) {
+        importFailures = (unsupported + failures.sorted {
+            (order[$0.file.id] ?? 0) < (order[$1.file.id] ?? 0)
+        }).filter { !dismissedImportFailureIDs.contains($0.file.id) }
+    }
+
+    /// A failure whose photo was cached but could not be stored is reported
+    /// like any other decode failure. A commit can land while the import is
+    /// still decoding, so a failure for a file the commit removed must not be
+    /// reported (or re-surfaced at the completed event) as if the photo were
+    /// broken.
+    private func pruneImportFailures(forRemoved removed: [SessionFile]) {
+        guard !removed.isEmpty else { return }
+        let ids = Set(removed.map(\.id))
+        importFailures.removeAll { ids.contains($0.file.id) }
+        dismissedImportFailureIDs.formUnion(ids)
+    }
+
+    /// A decode landed after culling opened: fill in window slots that loaded
+    /// before their photo's preview existed.
+    private func refreshPreview(id: String) {
+        thumbWindow?.refresh(id: id)
+        gridThumbs?.refresh(id: id)
+        displayImages?.refresh(id: id)
+    }
+
+    /// Deletes a preview whose file the user removed while the decode was in
+    /// flight (see the success branch in `importFiles`).
+    private func discardCachedPreview(at url: URL?) {
+        guard let url else { return }
+        let cache = self.cache
+        Task.detached(priority: .utility) { await cache.deleteCachedPreviews(at: url) }
     }
 
     private func finishDecoding(files: [SessionFile]) {
@@ -302,6 +456,7 @@ public final class AppState {
     /// Failures persist past the decoding → scrubbing transition so the
     /// scrub phase can surface them.
     public func dismissImportFailures() {
+        for failure in importFailures { dismissedImportFailureIDs.insert(failure.file.id) }
         importFailures = []
     }
 
@@ -492,6 +647,7 @@ extension AppState {
         guard generation == sessionGeneration else { return }
         let succeeded = outcomes.filter(\.succeeded).map(\.file)
         session.remove(succeeded)
+        pruneImportFailures(forRemoved: succeeded)
         gridSelection = gridSelection.filter { session.contains(id: $0) }
         commitFailures = outcomes.filter { !$0.succeeded }
         commitFailureRevision += 1
@@ -561,6 +717,7 @@ extension AppState {
         guard generation == sessionGeneration else { return }
         let succeeded = outcomes.filter(\.succeeded).map(\.file)
         session.remove(succeeded)
+        pruneImportFailures(forRemoved: succeeded)
         gridSelection = gridSelection.filter { session.contains(id: $0) }
         moveFailures = outcomes.filter { !$0.succeeded }
         moveFailureRevision += 1

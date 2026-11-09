@@ -26,6 +26,16 @@ final class AppStateWindowRetargetTests: XCTestCase {
         XCTFail("never reached scrubbing")
     }
 
+    /// Culling opens before a large shoot is decoded; assertions about a
+    /// window's contents need every preview in the cache first.
+    private func waitForBackgroundDecode(_ state: AppState) async {
+        for _ in 0..<600 {
+            if state.backgroundDecodeProgress == nil { return }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("background decode never finished")
+    }
+
     /// Real JPEGs, so the thumbnail path really decodes (the stub decoder
     /// produces 8×4 images and would hide the window behaviour).
     private func makeJPEGFiles(_ count: Int) throws -> [URL] {
@@ -70,6 +80,7 @@ final class AppStateWindowRetargetTests: XCTestCase {
         let state = AppState(decoder: ImageIODecoder(), cache: cache, trasher: StubTrasher())
         state.importFiles(urls: urls)
         await waitForScrubbing(state)
+        await waitForBackgroundDecode(state)
         await state.thumbWindow?.waitUntilSettled()
 
         XCTAssertFalse(state.thumbWindow === state.gridThumbs,

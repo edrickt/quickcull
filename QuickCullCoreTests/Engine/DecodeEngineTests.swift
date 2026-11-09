@@ -65,6 +65,41 @@ final class DecodeEngineTests: XCTestCase {
         }
     }
 
+    /// The early-culling gate needs one event per decoded file (the count
+    /// alone cannot say which preview is now cacheable), and each per-file
+    /// event must precede the progress count it increments: the handoff reads
+    /// the pair to decide whether the threshold was actually reached.
+    func testEmitsOneFileCompletedEventPerFileBeforeItsProgress() async throws {
+        let files = TestFixtures.makeFiles(["ok.cr2", "bad.cr2", "also_ok.cr2"])
+        let decoder = StubDecoder(failIDs: [files[1].id])
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let engine = DecodeEngine(decoder: decoder, cache: cache)
+
+        let events = await collect(engine.decodeAll(files: files))
+        var perFile: [DecodeOutcome] = []
+        var lastProgress = 0
+        for event in events {
+            switch event {
+            case .fileCompleted(let outcome):
+                perFile.append(outcome)
+            case .progress(let completed, _):
+                XCTAssertEqual(completed, perFile.count,
+                               "a file event must precede the progress count it increments")
+                lastProgress = completed
+            case .completed:
+                break
+            }
+        }
+        XCTAssertEqual(perFile.count, 3)
+        XCTAssertEqual(lastProgress, 3)
+        XCTAssertEqual(Set(perFile.map(\.file.id)), Set(files.map(\.id)))
+        XCTAssertEqual(perFile.filter { $0.error != nil }.map(\.file.id), [files[1].id])
+        guard case .completed = events.last else {
+            return XCTFail("completed must stay the terminal event")
+        }
+    }
+
     func testDecodedJPEGsAreWrittenToCache() async throws {
         let files = TestFixtures.makeFiles(["a.cr2", "b.cr2"])
         let (cache, base) = try await TestFixtures.makeTempCache()

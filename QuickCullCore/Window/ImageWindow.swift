@@ -56,6 +56,11 @@ public final class ImageWindow {
     /// Token per identity so a cancelled load's completion can't clear the
     /// bookkeeping of a newer load that replaced it.
     private var loadTokens: [String: Int] = [:]
+    /// Identities a decode-completion refresh asked for while their load was
+    /// still in flight (see `refresh(id:)`). The running load may have missed
+    /// the cache file before the decode finished, so the retry is deferred to
+    /// its completion instead of being dropped.
+    private var refreshPendingIDs: Set<String> = []
     private var nextLoadToken = 0
     private var currentIndex: Int = 0
 
@@ -135,12 +140,14 @@ public final class ImageWindow {
             self.loadTokens.removeValue(forKey: id)
             guard let position = self.positionsByID[id] else {
                 self.degradedIDs.remove(id)
+                self.refreshPendingIDs.remove(id)
                 return
             }
             let currentKeep = Set(self.policy.window(around: self.currentIndex, count: self.count))
                 .union(self.ensuredIndices)
             guard currentKeep.contains(position) else {
                 self.degradedIDs.remove(id)
+                self.refreshPendingIDs.remove(id)
                 return
             }
             if let image {
@@ -155,6 +162,14 @@ public final class ImageWindow {
                 // superseded tier) but the identity is wanted again. Retry,
                 // otherwise the slot keeps its placeholder until the user
                 // happens to scrub away and back.
+                self.refreshPendingIDs.remove(id)
+                self.startLoad(position)
+                return
+            }
+            // A decode that finished while this load was in flight asked for a
+            // retry; the load itself checked the cache before the decode wrote
+            // it, so it missed. Re-run now that the cache entry exists.
+            if self.refreshPendingIDs.remove(id) != nil, self.images[position] == nil {
                 self.startLoad(position)
                 return
             }
@@ -201,6 +216,31 @@ public final class ImageWindow {
                 startLoad(i)
             }
         }
+    }
+
+    /// True when a position is within the residency this window currently
+    /// wants: the policy window around the current index, or an index a
+    /// visible cell ensured.
+    private func isWanted(_ position: Int) -> Bool {
+        ensuredIndices.contains(position)
+            || policy.window(around: currentIndex, count: count).contains(position)
+    }
+
+    /// Re-queues the load for an identity whose decoded preview just landed in
+    /// the cache. The import keeps decoding after culling opens (see
+    /// `AppState.earlyViewThreshold`), so a slot that loaded before its photo
+    /// was decoded would otherwise stay empty until the user scrubbed away and
+    /// back. No-op for identity outside this window's residency and for an
+    /// image that is already resident.
+    public func refresh(id: String) {
+        guard let position = positionsByID[id], images[position] == nil, isWanted(position) else {
+            return
+        }
+        if inFlightIDs.contains(id) {
+            refreshPendingIDs.insert(id)
+            return
+        }
+        startLoad(position)
     }
 
     private var ensuredIndices: Set<Int> = []
@@ -274,6 +314,7 @@ public final class ImageWindow {
             guard ids.indices.contains(i) else { continue }
             let id = ids[i]
             degradedIDs.remove(id)
+            refreshPendingIDs.remove(id)
             // Cancel, but leave the in-flight marker and token to the task
             // itself. The decode cannot be interrupted once it starts, so
             // dropping the marker here would let the same identity decode twice
@@ -309,6 +350,7 @@ public final class ImageWindow {
         }
         inFlightIDs.formIntersection(newPositions.keys)
         degradedIDs.formIntersection(newPositions.keys)
+        refreshPendingIDs.formIntersection(newPositions.keys)
 
         // Resident images follow their identity to its new position.
         var remapped: [Int: CGImage] = [:]

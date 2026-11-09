@@ -11,19 +11,31 @@ extension OSLog {
 public struct DecodeOutcome: Equatable {
     public let file: SessionFile
     public let error: DecodeError?
+    /// Where the decoded preview was written, when the decode cached one.
+    /// Carried so the app can delete a preview that lands after its file was
+    /// trashed or moved: the write recomputes the cache key after the file is
+    /// gone, so the commit's own discard (resolved while the file existed)
+    /// cannot name the same path.
+    public let previewURL: URL?
 
-    public init(file: SessionFile, error: DecodeError?) {
+    public init(file: SessionFile, error: DecodeError?, previewURL: URL? = nil) {
         self.file = file
         self.error = error
+        self.previewURL = previewURL
     }
 }
 
 /// Phase 1: decode every file to a cached full-res q75 JPEG in parallel,
 /// bounded by the memory-aware worker rule (one worker per 1 GB of RAM,
-/// capped by core count). Emits strictly monotonic progress events, then
-/// exactly one completed event with per-file outcomes.
+/// capped by core count). Emits one per-file event as each decode lands (so
+/// the app can open culling before the whole shoot is done), strictly
+/// monotonic progress events, then exactly one completed event with per-file
+/// outcomes.
 public actor DecodeEngine {
     public enum Event {
+        /// One file finished (success or failure), in completion order. The
+        /// cached JPEG is already on disk when this is delivered.
+        case fileCompleted(DecodeOutcome)
         case progress(completed: Int, total: Int)
         case completed([DecodeOutcome])
     }
@@ -120,7 +132,7 @@ public actor DecodeEngine {
                                 self.benchmarkAccum.append(Benchmark(fileID: file.id, totalMs: totalMs, width: benchWidth, height: benchHeight))
                                 os_signpost(.end, log: OSLog.decode, name: "decode", signpostID: signpostID, "file=%{public}@ totalMs=%{public}f", file.id, totalMs)
                                 outcomes.append(outcome)
-                                await reporter.reportProgress()
+                                await reporter.report(outcome)
                             }
                         }
                     }
@@ -162,8 +174,9 @@ public actor DecodeEngine {
         guard let bitmap = decoded.bitmap else {
             return (DecodeOutcome(file: file, error: decoded.error ?? .invalidOutput), 0, 0)
         }
+        let jpegURL: URL
         do {
-            let jpegURL = try await cache.storeJPEG(bitmap, for: file, quality: options.jpegQuality)
+            jpegURL = try await cache.storeJPEG(bitmap, for: file, quality: options.jpegQuality)
             // Histogram sidecar is best-effort: its failure must never fail the
             // import, and it is written beside the JPEG whose key it shares.
             if let hist = bitmap.histogram {
@@ -176,7 +189,8 @@ public actor DecodeEngine {
             return (DecodeOutcome(file: file, error: .cannotStorePreview("\(error)")),
                     bitmap.width, bitmap.height)
         }
-        return (DecodeOutcome(file: file, error: nil), bitmap.width, bitmap.height)
+        return (DecodeOutcome(file: file, error: nil, previewURL: jpegURL),
+                bitmap.width, bitmap.height)
     }
 
     /// Runs blocking CPU work on a dispatch queue rather than a cooperative
@@ -220,10 +234,10 @@ actor JobQueue<Element> {
     }
 }
 
-/// Serializes progress delivery: increments and yields inside one actor
-/// isolation, so there is no preemption window between the two. Delivered
-/// `completed:` values are strictly monotonic by construction, not by
-/// scheduling accident.
+/// Serializes event delivery: the per-file outcome, the increment and the
+/// progress yield happen inside one actor isolation, so there is no
+/// preemption window between them. Delivered `completed:` values are strictly
+/// monotonic by construction, not by scheduling accident.
 actor ProgressReporter {
     private let continuation: AsyncStream<DecodeEngine.Event>.Continuation
     private let total: Int
@@ -234,7 +248,10 @@ actor ProgressReporter {
         self.continuation = continuation
     }
 
-    func reportProgress() {
+    /// Delivers the per-file outcome first: a consumer that opens the viewer
+    /// on this file must see it before the progress count says it is done.
+    func report(_ outcome: DecodeOutcome) {
+        continuation.yield(.fileCompleted(outcome))
         completed += 1
         continuation.yield(.progress(completed: completed, total: total))
     }

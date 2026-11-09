@@ -42,14 +42,14 @@ The build compiles LibRaw 0.22.1 into `Build/libraw/` the first time, which take
 ## How it works
 
 1. **Select photos.** Multi-select in the file picker. Unsupported formats appear in a dismissible banner instead of quietly disappearing from the count.
-2. **Decode all.** RAWs go through LibRaw at full resolution, standard formats through ImageIO with EXIF orientation baked in. The cache holds full-resolution q75 JPEGs. Scrubbing is blocked until every file is decoded.
+2. **Decode.** RAWs go through LibRaw at full resolution, standard formats through ImageIO with EXIF orientation baked in. The cache holds full-resolution q75 JPEGs. Culling opens once 50 photos are decoded (a shoot of 50 or fewer waits for all of them); the rest keep decoding in the background and fill in as they land.
 3. **Scrub.** Step with the keyboard. Hold `Space` at fit for the 100% loupe. It shows genuine source-pixel 1:1 at any image size.
 4. **Flag and commit.** Tap `Z`/`X`/`C` to flag red/yellow/green, filter if you want to review just one color, then pick Trash or Move from its dropdown and choose a color or All Flagged. Files that fail stay flagged so you can retry. `File > New Session` (⇧⌘N) wipes flags and the cache and returns to the importer.
 
 ## Features
 
 - **True RAW histogram.** Linear counts before white balance and gamma, with clipping percent, mean, and luminance.
-- **Decode first, scrub without waiting.** Every file decoded up front at full resolution, so the arrow keys never stall.
+- **Cull before the import finishes.** Culling opens as soon as 50 full-size previews are cached; the rest keep decoding behind the scrub view and appear as they land, so a long import no longer holds the whole shoot behind the first photo.
 - **Stays responsive on big shoots.** Pre-loads around the current photo and shows true 1:1 pixels in the `Space` loupe.
 - **Three ways to look.** Single, side-by-side split with shared zoom and pan, and a grid with batch flagging.
 - **Metadata where you need it.** Sliding sidebar with camera, lens, exposure, plus file name under every thumbnail.
@@ -117,7 +117,7 @@ Build the test bundle, then run it directly with `xcrun xctest`:
 
     xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 
-282 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
+296 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
 
 #### Fixtures
 

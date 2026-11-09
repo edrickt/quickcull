@@ -190,6 +190,7 @@ struct ScrubView: View {
             viewModePicker
             filterLabel
             filterPicker
+            decodingChip
             metadataButton
             Spacer()
             actionButtons
@@ -202,6 +203,7 @@ struct ScrubView: View {
                 viewModePicker
                 filterLabel
                 filterPicker
+                decodingChip
                 metadataButton
                 Spacer()
             }
@@ -210,6 +212,28 @@ struct ScrubView: View {
                 actionButtons
                 Spacer()
             }
+        }
+    }
+
+    /// Decode progress shown only when culling opened before the shoot was
+    /// fully decoded (see `AppState.backgroundDecodeProgress`). Photos whose
+    /// full-size preview is not cached yet show the viewer's loading state,
+    /// so this is what explains the wait and says when it is over.
+    @ViewBuilder
+    private var decodingChip: some View {
+        if let progress = appState.backgroundDecodeProgress {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Decoding \(progress.completed) of \(progress.total)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .fixedSize()
+            }
+            .frame(height: Self.barControlHeight)
+            .help("The rest of the shoot is still decoding; those photos fill in as they land")
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Decoding \(progress.completed) of \(progress.total)")
         }
     }
 

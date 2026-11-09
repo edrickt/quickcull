@@ -520,6 +520,65 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertTrue(decoded.contains("keep"), "the surviving identity still loads")
         XCTAssertNotNil(window.image(at: 0))
     }
+
+    /// Culling opens before the whole shoot has decoded, so a slot can load
+    /// while its photo's preview is still absent from the cache. When that
+    /// decode lands, `refresh(id:)` must fill the slot without user input.
+    func testRefreshLoadsAPreviewThatMissedItsFirstLoad() async {
+        var available: Set<String> = []
+        let window = identifiedWindow(ids: ["a", "b"], radius: 0) { id in
+            guard available.contains(id) else { return nil }
+            return TestFixtures.makeCGImage(width: 4, height: 4, color: 1)
+        }
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+        XCTAssertNil(window.image(at: 0), "precondition: the first load missed the cache")
+
+        available.insert("a")
+        window.refresh(id: "a")
+        await window.waitUntilSettled()
+        XCTAssertNotNil(window.image(at: 0), "the landed preview must fill its slot")
+    }
+
+    /// The refresh can race the load it wants to correct: the load is already
+    /// running (and will miss), so the retry must be deferred to its
+    /// completion instead of being dropped with the in-flight marker.
+    func testRefreshDuringAnInFlightMissRetriesAfterItSettles() async {
+        var attempts = 0
+        let window = identifiedWindow(ids: ["a"], radius: 0) { _ in
+            attempts += 1
+            if attempts == 1 {
+                // Slow miss: the test refreshes while this load is in flight.
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                return nil
+            }
+            return TestFixtures.makeCGImage(width: 4, height: 4, color: 2)
+        }
+        window.setCurrent(0)
+        window.refresh(id: "a")   // in flight from setCurrent: must defer, not drop
+        await window.waitUntilSettled()
+        XCTAssertGreaterThanOrEqual(attempts, 2, "a refresh during an in-flight miss must retry")
+        XCTAssertNotNil(window.image(at: 0))
+    }
+
+    /// Only slots the window actually wants (policy window or a visible
+    /// cell's ensure) may be loaded by a refresh: the filmstrip and grid can
+    /// otherwise decode a thumbnail for a photo the user is nowhere near.
+    func testRefreshIgnoresAnIdentityOutsideTheResidencyWindow() async {
+        let loads = Counter()
+        let window = identifiedWindow(ids: ["a", "b", "c"], radius: 0) { id in
+            loads.append(id)
+            return TestFixtures.makeCGImage(width: 4, height: 4, color: 3)
+        }
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+        let before = loads.count
+
+        window.refresh(id: "c")
+        await window.waitUntilSettled()
+        XCTAssertEqual(loads.count, before, "a slot this window does not want must not load")
+        XCTAssertNil(window.image(at: 2))
+    }
 }
 
 /// Async gate for tests: loaders park on it until the test opens it. Unlike a
