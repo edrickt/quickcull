@@ -44,3 +44,37 @@ Confirm anything suspect with `xcodebuild` before touching code.
 - `QuickCullCore` holds all logic and is unit-tested; the app target holds
   SwiftUI/AppKit views only.
 - Comments explain a non-obvious *why*. Do not narrate what the code does.
+
+## Codebase navigation
+
+File routing for this repo is in `docs/agents/codebase-map.md`. Read it before
+the first broad search (`ls`, tree-wide `grep`/`glob`, or reading whole
+directories): it names the file to open for each concern and where a new file
+belongs.
+
+Layout, so the first `ls` is unnecessary:
+
+- `QuickCull/` app target: SwiftUI/AppKit views only.
+- `QuickCullCore/` all logic and state, unit-tested by `QuickCullCoreTests/`.
+- `QuickCullCoreTests/` XCTest suites mirroring the core dirs, plus
+  `Support/` and `Fixtures/`.
+- `Scripts/` build, install, fixture and benchmark scripts.
+- `docs/` docs index; `docs/archive/` is history.
+
+Entry points for a change:
+
+- `QuickCull/QuickCullApp.swift` (`@main`, menu commands) and
+  `QuickCull/RootView.swift` (phase switch).
+- `QuickCullCore/App/AppState.swift`: phase machine, import pipeline,
+  commit/move orchestration; start here for any cross-cutting behavior.
+- `QuickCullCore/Session/Session.swift`: flags, filters, current index.
+- `QuickCullCore/Decoding/RawDecoding.swift`: decoder protocol and error
+  taxonomy.
+- `QuickCullCore/Window/ImageWindow.swift`: preloaded image residency.
+
+Do not read `Build/`, `docs/archive/`, `.superpowers/`, the raw fixture samples
+or `QuickCull.xcodeproj/project.pbxproj`; the map's "Don't read" section says
+why.
+
+`docs/audits/2026-11-08-code-quality-audit-round3.md` is worth reading only
+when you need the reason behind an invariant, not for current line numbers.
