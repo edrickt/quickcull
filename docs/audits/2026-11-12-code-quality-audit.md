@@ -117,8 +117,10 @@ session that replaced it competed for the shared decode limiter.
 
 `deinit` now cancels the tasks still registered. That cannot be done from the
 window's main-actor-isolated dictionary, so the tasks are mirrored into a small
-locked `LoadTasks` box that `deinit` can read; entries are removed as each load
-settles, so it stays bounded by what is actually in flight. The regression test
+locked `LoadTasks` box that `deinit` can read; entries are removed when a load
+settles or when a `retarget(ids:)` drops the identity (whose task completion
+returns early at the stale-token guard and so cannot untrack itself), keeping
+the box bounded by the loads the window still owns. The regression test
 parks a loader on a gate, drops the window, releases the gate, and requires the
 loader to observe cancellation.
 

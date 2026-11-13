@@ -65,8 +65,9 @@ public final class ImageWindow {
     private var currentIndex: Int = 0
     /// The same tasks in a reference box, so a window dropped mid-fill can
     /// cancel them from `deinit` (a `@MainActor`-isolated dictionary cannot be
-    /// read there). Entries are removed as each load settles, so the box stays
-    /// bounded by the loads actually in flight.
+    /// read there). Entries are removed when a load settles or when a retarget
+    /// drops its identity, so the box stays bounded by the loads the window
+    /// still owns.
     private let loadTasks = LoadTasks()
 
     /// Symmetric window: `radius` images before and after current.
@@ -352,8 +353,12 @@ public final class ImageWindow {
         for (position, id) in newIDs.enumerated() { newPositions[id] = position }
 
         // Work and flags for identities that left the projection are dropped.
+        // The task's completion cannot do its own untracking: the token guard
+        // above returns early once the token is gone, so the box entry is
+        // released here (a retained handle would live until `deinit`).
         for id in taskByID.keys where newPositions[id] == nil {
             taskByID.removeValue(forKey: id)?.cancel()
+            loadTasks.untrack(id)
             loadTokens.removeValue(forKey: id)
         }
         inFlightIDs.formIntersection(newPositions.keys)
