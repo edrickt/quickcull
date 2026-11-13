@@ -6,7 +6,7 @@
 
 Fast photo culling for macOS. Scrub RAWs with the arrow keys, flag keepers in three colors, trash or move the rest.
 
-**1.0.4 · macOS 14+ · Apple Silicon + Intel · MIT**
+**1.0.5 · macOS 14+ · Apple Silicon + Intel · MIT**
 
 [![Release](https://img.shields.io/github/v/release/edrickt/quickcull)](https://github.com/edrickt/quickcull/releases/latest) ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
