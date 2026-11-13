@@ -1,6 +1,6 @@
 # QuickCull codebase map
 
-Verified against `b523424` (2026-11-12). Native macOS 14+ photo-culling app: SwiftUI/AppKit views in `QuickCull/`, all logic and tests in `QuickCullCore/`; no third-party deps except LibRaw, which is built. Start at `QuickCull/QuickCullApp.swift:48`; learn `AppState` (`QuickCullCore/App/AppState.swift:28`) first.
+Verified against `f09473a` (2026-11-12). Native macOS 14+ photo-culling app: SwiftUI/AppKit views in `QuickCull/`, all logic and tests in `QuickCullCore/`; no third-party deps except LibRaw, which is built. Start at `QuickCull/QuickCullApp.swift:48`; learn `AppState` (`QuickCullCore/App/AppState.swift:28`) first.
 
 Maintenance: after adding, moving, or deleting a source file, update the File index and bump `Verified against` to the commit you checked.
 
@@ -33,13 +33,13 @@ Maintenance: after adding, moving, or deleting a source file, update the File in
 | Concern | Files |
 | --- | --- |
 | App entry, menu commands, quit-time cache wipe | `QuickCull/QuickCullApp.swift:48`, `QuickCull/RootView.swift` |
-| Phase machine, import pipeline, early-open threshold (50 previews) | `QuickCullCore/App/AppState.swift:28`, `importFiles` `:225`, threshold `:54`, `:277` |
+| Phase machine, import pipeline, early-open threshold (50 previews) | `QuickCullCore/App/AppState.swift:28`, `importFiles` `:253`, threshold `:54`, `:305` |
 | Keyboard hotkeys (arrows, Z/X/C, Space loupe, Cmd+A) | `QuickCullCore/Keys/CullKeyMap.swift:14`, `QuickCullCore/Keys/KeyRouter.swift:22`, `QuickCull/KeyboardMonitor.swift:10` |
 | Flag mutation, flag revision, flag colors | `QuickCullCore/Session/FlagColor.swift:3`, `QuickCull/FlagColor+UI.swift`, `QuickCullCore/Session/Session.swift:10` (`toggleFlag` `:168`) |
 | Filter / visible sequence projection | `QuickCullCore/Session/CullFilter.swift:7`, `QuickCullCore/Session/Session.swift:119` |
 | Badge rule (flagged and image loaded) | `QuickCullCore/Models/FlagBadgeLogic.swift:6`, `QuickCull/FlagBadge.swift`, `QuickCull/BadgedThumbnailView.swift:10` |
-| Trash commit | `QuickCullCore/Commit/TrashCommit.swift:30`, `QuickCullCore/App/AppState.swift:628` |
-| Move commit and collision rename | `QuickCullCore/Commit/MoveCommit.swift:24`, `QuickCullCore/App/AppState.swift:697` |
+| Trash commit | `QuickCullCore/Commit/TrashCommit.swift:30`, `QuickCullCore/App/AppState.swift:660` |
+| Move commit and collision rename | `QuickCullCore/Commit/MoveCommit.swift:24`, `QuickCullCore/App/AppState.swift:729` |
 | Decoder protocol and error taxonomy | `QuickCullCore/Decoding/RawDecoding.swift:51` (`RawDecoding`), `:37` (`DecodeError`) |
 | Format routing, supported extensions, both decoders | `QuickCullCore/Models/RawFileIdentity.swift:10`, `QuickCullCore/Decoding/ImageIODecoder.swift:9`, `:44` (`RoutingDecoder`), `QuickCullCore/Decoding/LibRawDecoder.swift:6`, `Scripts/build-libraw.sh` |
 | Parallel decode and concurrency limit | `QuickCullCore/Engine/DecodeEngine.swift:34`, `QuickCullCore/Engine/DecodeLimiter.swift:14` |
@@ -47,7 +47,7 @@ Maintenance: after adding, moving, or deleting a source file, update the File in
 | Preload window policy and image residency | `QuickCullCore/Window/WindowPolicy.swift:8`, `QuickCullCore/Window/ImageWindow.swift:26` |
 | Main viewer: single/split display, zoom, 100% loupe | `QuickCull/ImageDisplayView.swift:7`, `QuickCull/ZoomableImageView.swift:11` (`LoupeView` `:388`) |
 | Scrub screen: control bar, commit/move dialogs | `QuickCull/ScrubView.swift:5` (`controlBar` `:170`) |
-| Grid, filmstrip, batch flagging | `QuickCull/GridView.swift:8`, `QuickCull/FilmstripView.swift:18`, `QuickCullCore/App/AppState.swift:586` (select all) |
+| Grid, filmstrip, batch flagging | `QuickCull/GridView.swift:8`, `QuickCull/FilmstripView.swift:18`, `QuickCullCore/App/AppState.swift:618` (select all) |
 | Metadata HUD and histograms | `QuickCullCore/Metadata/ImageMetadataProvider.swift:21`, `QuickCullCore/Metadata/RawHistogram.swift:7`, `QuickCull/MetadataHUDView.swift:5`, `QuickCull/HistogramViews.swift:49` |
 | Custom dropdowns and click-through policy | `QuickCull/DropdownMenu.swift:14`, `QuickCullCore/Window/DropdownClickPolicy.swift:13` |
 | Screen/view coordinate hit-testing | `QuickCullCore/Window/WindowHitTest.swift:16` |
@@ -56,15 +56,15 @@ Maintenance: after adding, moving, or deleting a source file, update the File in
 
 ## Task recipes
 
-**Add a culling key action.** Read `QuickCullCore/Keys/CullKeyMap.swift:14` (keyCode/character map, layout-aware), `QuickCullCore/Keys/KeyRouter.swift:22` (modifier/sheet/text-field passthrough), `QuickCull/KeyboardMonitor.swift:10` (installs monitors). Change `CullAction` and the map, then dispatch it in `AppState.handle` (`QuickCullCore/App/AppState.swift:463`). Test with the Keys suites.
+**Add a culling key action.** Read `QuickCullCore/Keys/CullKeyMap.swift:14` (keyCode/character map, layout-aware), `QuickCullCore/Keys/KeyRouter.swift:22` (modifier/sheet/text-field passthrough), `QuickCull/KeyboardMonitor.swift:10` (installs monitors). Change `CullAction` and the map, then dispatch it in `AppState.handle` (`QuickCullCore/App/AppState.swift:495`). Test with the Keys suites.
 
 **Add a supported camera/raw format.** Read `QuickCullCore/Models/RawFileIdentity.swift:10` (extension allowlist and `DecoderKind`), `QuickCullCore/Decoding/ImageIODecoder.swift:44` (`RoutingDecoder`). Change the extension sets; add a fixture only if a decoder test must cover it. Test with the Decoding suites.
 
-**Change preload or memory behavior.** Read `QuickCullCore/Window/WindowPolicy.swift:8` (pure index math), `QuickCullCore/Window/ImageWindow.swift:26` (loaders, reduced tier, `retarget` `:336`), then `AppState.installWindows` at `QuickCullCore/App/AppState.swift:430` and `syncWindows` `:594`. Test with the Window suites.
+**Change preload or memory behavior.** Read `QuickCullCore/Window/WindowPolicy.swift:8` (pure index math), `QuickCullCore/Window/ImageWindow.swift:26` (loaders, reduced tier, `retarget` `:344`), then `AppState.installWindows` at `QuickCullCore/App/AppState.swift:458` and `syncWindows` `:626`. Test with the Window suites.
 
 **Change the cache key, format or lifecycle.** Read `QuickCullCore/Storage/ImageCacheStore.swift:9`, callers in `QuickCullCore/Engine/DecodeEngine.swift:109`. Test with the Storage suite; the cache is wiped on launch and quit, so no migration is needed.
 
-**Change Trash or Move semantics.** Read `QuickCullCore/Commit/TrashCommit.swift:30`, `QuickCullCore/Commit/MoveCommit.swift:24` (directory identity, collision rename), callers `AppState.confirmCommit` at `QuickCullCore/App/AppState.swift:628` and `confirmMove` `:697`. Add a regression test in `QuickCullCoreTests/Commit/`. Test with the Commit suites.
+**Change Trash or Move semantics.** Read `QuickCullCore/Commit/TrashCommit.swift:30`, `QuickCullCore/Commit/MoveCommit.swift:24` (directory identity, collision rename), callers `AppState.confirmCommit` at `QuickCullCore/App/AppState.swift:660` and `confirmMove` `:729`. Add a regression test in `QuickCullCoreTests/Commit/`. Test with the Commit suites.
 
 **Add a Metadata HUD field.** Read `QuickCullCore/Metadata/ImageMetadataProvider.swift:21` (EXIF parsing), `QuickCull/MetadataHUDView.swift:5` (rows and layout), `QuickCullCore/Storage/ImageCacheStore.swift:188` (cached histogram). Test with the Metadata suite; HUD layout itself has no unit test.
 
@@ -105,7 +105,7 @@ Fixtures: 11 pinned raw samples in `QuickCullCoreTests/Fixtures/raws/` are track
 
 - `xcodebuild` is the only authoritative type check. The editor's Swift language server reports cross-file "Cannot find type" noise; see `AGENTS.md`.
 - The Xcode project uses `PBXFileSystemSynchronizedRootGroup`: a new file under `QuickCull/`, `QuickCullCore/` or `QuickCullCoreTests/` joins its target automatically. Do not add file references by hand.
-- `docs/audits/2026-11-08-code-quality-audit-round3.md` is a snapshot at baseline `bdbcb97` (it says 272 tests; the tree has 296). Treat its states, counts and line anchors as historical.
+- `docs/audits/2026-11-08-code-quality-audit-round3.md` is a snapshot at baseline `bdbcb97` (it says 272 tests; the tree has 302). Treat its states, counts and line anchors as historical.
 - Flags live only in memory. There is no flags file, no undo log and no persistence layer to change.
 - Cache identity comes from `RawFileIdentity.fileID`, which resolves symlinks. A duplicate photo or a stale preview is usually an identity or cache-key bug, not a decode bug.
 - `Scripts/verify-control-bar.swift` and `Scripts/verify-dropdown.swift` mirror the app UI by hand and are not built by Xcode; update them when `ScrubView` or `DropdownMenu` changes.
