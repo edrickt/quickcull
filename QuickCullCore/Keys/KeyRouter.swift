@@ -57,19 +57,28 @@ public enum KeyRouter {
         return .handle(action)
     }
 
-    /// Whether the app-wide Space monitor should treat a Space press as the
+    /// Whether the app-wide Space monitor should treat a Space event as the
     /// 100% loupe (and consume it), or leave it to the system.
     ///
-    /// `canActivateLoupe` is the same predicate `AppState.setLoupeActive`
-    /// enforces, so Space is only taken where the loupe can actually start:
-    /// scrubbing with a rendered image, not the grid, not a filtered-empty
-    /// placeholder, and not while a commit or move is in flight. Anywhere else
-    /// Space belongs to the focused control or the scroll view.
+    /// Key-down is consumed only where `canActivateLoupe` allows a hold: the
+    /// same predicate `AppState.setLoupeActive` enforces, so Space is never
+    /// taken where no loupe can appear (importer, decoding, grid,
+    /// filtered-empty placeholder, a photo whose preview has not landed, a
+    /// commit/move in flight or pending).
+    ///
+    /// Key-up is consumed whenever a hold is still set, even if the activation
+    /// context disappeared in between. The monitor sees only Space events, so
+    /// a release is the last chance to end the hold; without this a hold that
+    /// outlived its context stayed set and the loupe reappeared later with the
+    /// key no longer held.
     public static func consumesLoupeSpace(hasCommand: Bool,
                                           hasControl: Bool,
                                           hasOption: Bool,
                                           systemOwnsKeys: Bool,
-                                          canActivateLoupe: Bool) -> Bool {
+                                          canActivateLoupe: Bool,
+                                          isKeyUp: Bool = false,
+                                          isLoupeActive: Bool = false) -> Bool {
+        if isKeyUp, isLoupeActive { return true }
         guard canActivateLoupe else { return false }
         guard !hasCommand, !hasControl, !hasOption else { return false }
         guard !systemOwnsKeys else { return false }

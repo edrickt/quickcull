@@ -63,6 +63,11 @@ public final class ImageWindow {
     private var refreshPendingIDs: Set<String> = []
     private var nextLoadToken = 0
     private var currentIndex: Int = 0
+    /// The same tasks in a reference box, so a window dropped mid-fill can
+    /// cancel them from `deinit` (a `@MainActor`-isolated dictionary cannot be
+    /// read there). Entries are removed as each load settles, so the box stays
+    /// bounded by the loads actually in flight.
+    private let loadTasks = LoadTasks()
 
     /// Symmetric window: `radius` images before and after current.
     ///
@@ -132,11 +137,12 @@ public final class ImageWindow {
         nextLoadToken += 1
         let token = nextLoadToken
         loadTokens[id] = token
-        taskByID[id] = Task { [weak self] in
+        let task = Task { [weak self] in
             let image = await load(id)
             guard let self, self.loadTokens[id] == token else { return }
             self.inFlightIDs.remove(id)
             self.taskByID.removeValue(forKey: id)
+            self.loadTasks.untrack(id)
             self.loadTokens.removeValue(forKey: id)
             guard let position = self.positionsByID[id] else {
                 self.degradedIDs.remove(id)
@@ -182,6 +188,8 @@ public final class ImageWindow {
                 self.startLoad(position)
             }
         }
+        taskByID[id] = task
+        loadTasks.track(task, for: id)
     }
 
     /// True when the identity at `index` has a load in flight.
@@ -421,6 +429,14 @@ public final class ImageWindow {
         }
     }
 
+    /// A window that is dropped mid-fill must not keep decoding: its results
+    /// can never be shown, and the queued loads (the display window queues its
+    /// whole extent `current`-first) would keep holding decode-limiter slots
+    /// and CPU while the session that replaced it is starting.
+    deinit {
+        loadTasks.cancelAll()
+    }
+
     // MARK: App factories
 
     /// Filmstrip window: bounded radius, 320px thumbnails. Cells call
@@ -620,6 +636,31 @@ public final class ImageWindow {
               let height = props[kCGImagePropertyPixelHeight] as? Int,
               width > 0, height > 0 else { return nil }
         return max(width, height)
+    }
+}
+
+/// The load tasks a window owns, boxed so `deinit` can cancel them: the
+/// window's own bookkeeping is main-actor isolated and unreadable there. The
+/// lock covers the deinit read; while the window is alive only the main actor
+/// mutates it.
+private final class LoadTasks: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tasks: [String: Task<Void, Never>] = [:]
+
+    func track(_ task: Task<Void, Never>, for id: String) {
+        lock.lock(); tasks[id] = task; lock.unlock()
+    }
+
+    func untrack(_ id: String) {
+        lock.lock(); tasks.removeValue(forKey: id); lock.unlock()
+    }
+
+    func cancelAll() {
+        lock.lock()
+        let all = Array(tasks.values)
+        tasks.removeAll()
+        lock.unlock()
+        for task in all { task.cancel() }
     }
 }
 

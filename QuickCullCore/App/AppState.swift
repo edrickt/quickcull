@@ -57,7 +57,11 @@ public final class AppState {
     /// when the count is unchanged (two commits failing on one file each).
     /// Observing `commitFailures.count` misses that second notification.
     public private(set) var commitFailureRevision: Int = 0
-    public private(set) var pendingCommitCount: Int = 0
+    /// The destructive flow owns the loupe hold too: a hold that started before
+    /// the dialog/commit/move must not survive it (see `releaseLoupeHold`).
+    public private(set) var pendingCommitCount: Int = 0 {
+        didSet { if pendingCommitCount > 0 { releaseLoupeHold() } }
+    }
     public private(set) var pendingCommitColor: FlagColor?
     /// The exact files the pending dialog names. Snapshotted at request time so
     /// a flag key that lands while the alert is up cannot change what gets
@@ -65,7 +69,9 @@ public final class AppState {
     private var pendingCommitFiles: [SessionFile] = []
     public private(set) var lastCommitColor: FlagColor?
     public private(set) var isCommitting: Bool = false
-    public private(set) var pendingMoveCount: Int = 0
+    public private(set) var pendingMoveCount: Int = 0 {
+        didSet { if pendingMoveCount > 0 { releaseLoupeHold() } }
+    }
     public private(set) var pendingMoveDestination: URL?
     public private(set) var pendingMoveColor: FlagColor?
     /// See `pendingCommitFiles`.
@@ -199,15 +205,37 @@ public final class AppState {
     ///
     /// Single source of truth for `setLoupeActive` and the app-wide key
     /// monitor: the session must be on screen with a rendered image (not the
-    /// grid, not a filtered-empty placeholder) and no commit or move may be in
-    /// flight. Space is only consumed where this is true; everywhere else it
-    /// belongs to the focused control or scroll view.
+    /// grid, not a filtered-empty placeholder, not a photo whose preview has
+    /// not landed yet), and no commit, move, or pending commit/move dialog may
+    /// be in flight. Space is only consumed where this is true; everywhere else
+    /// it belongs to the focused control or scroll view.
+    ///
+    /// "Rendered image" is the viewer's own fallback chain
+    /// (`ImageDisplayView`): the full-size display window, else the filmstrip
+    /// thumbnail. During the early-view background decode a photo navigated to
+    /// before its preview lands shows a spinner, and a consumed Space there
+    /// would produce no loupe.
     public var canActivateLoupe: Bool {
-        phase == .scrubbing
-            && !isMoving
-            && !isCommitting
-            && viewMode != .grid
-            && !(session?.files.isEmpty ?? true)
+        guard phase == .scrubbing,
+              !isMoving,
+              !isCommitting,
+              pendingCommitCount == 0,
+              pendingMoveCount == 0,
+              viewMode != .grid,
+              let session,
+              !session.files.isEmpty else { return false }
+        let index = session.currentIndex
+        return displayImages?.image(at: index) != nil || thumbWindow?.image(at: index) != nil
+    }
+
+    /// Ends a loupe hold whose activation context just disappeared.
+    ///
+    /// The monitor only re-evaluates the hold on the next Space event, so a
+    /// hold that started before a commit, a pending dialog, or an emptied
+    /// projection would otherwise outlive the state it magnified and the loupe
+    /// would reappear without Space held once the blocking state ends.
+    private func releaseLoupeHold() {
+        if isLoupeActive { isLoupeActive = false }
     }
 
     public func setLoupeActive(_ active: Bool) {
@@ -428,6 +456,10 @@ public final class AppState {
     }
 
     private func installWindows(for files: [SessionFile]) {
+        // A filter that matches nothing (or a removal that empties the
+        // projection) takes the image away from under a held loupe; the hold
+        // must not come back when the projection does.
+        if files.isEmpty { releaseLoupeHold() }
         let ids = files.map(\.id)
         if thumbWindow == nil || gridThumbs == nil || displayImages == nil
             || windowsGeneration != sessionGeneration {

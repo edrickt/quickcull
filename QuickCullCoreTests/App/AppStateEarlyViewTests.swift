@@ -222,27 +222,39 @@ final class AppStateEarlyViewTests: XCTestCase {
     /// Dismissing the banner during the background decode must stick: a later
     /// failure re-surfaces only itself, and the completed event must not put
     /// the acknowledged failure back on screen.
+    ///
+    /// The late failure is gated rather than merely slow. The test cannot
+    /// assume it observes the exact handoff turn: the decode event stream is
+    /// buffered and the import loop can drain many events in one main-actor
+    /// turn, so by the time the poll sees `.scrubbing` the "late" failure may
+    /// already have landed (and the import may even have completed). That made
+    /// the test flaky — it passed on the baseline run and failed in this
+    /// audit's first full-suite run. The gate makes the ordering the test
+    /// names true by construction instead.
     func testDismissedFailuresAreNotResurrectedByLaterFailures() async throws {
         let files = try makeFiles(count: 20)
         let earlyBad = files[0]
         let lateBad = files[8]
-        let decoder = SlowStubDecoder(
-            failIDs: Set([earlyBad, lateBad].map { RawFileIdentity.fileID(for: $0) }),
-            delay: 20_000_000)
+        let decoder = GatedMidDecodeDecoder(
+            gatedID: RawFileIdentity.fileID(for: lateBad),
+            failIDs: [RawFileIdentity.fileID(for: earlyBad)],
+            gatedError: .cannotUnpack("stub failure"))
         let state = makeState(decoder: decoder, threshold: 2)
 
         state.importFiles(urls: files)
         let opened = await waitUntil { state.phase == .scrubbing }
         XCTAssertTrue(opened)
-        XCTAssertEqual(state.importFailures.map(\.file.url), [earlyBad],
-                       "the failure that landed before the handoff is reported")
+        // The early failure can land just before or just after the handoff
+        // (both paths report it); wait for it instead of assuming either.
+        let earlyReported = await waitUntil { state.importFailures.map(\.file.url) == [earlyBad] }
+        XCTAssertTrue(earlyReported, "the failure that landed before the handoff is reported")
 
         state.dismissImportFailures()
         XCTAssertTrue(state.importFailures.isEmpty)
 
+        decoder.open()
         let resurfaced = await waitUntil {
-            state.backgroundDecodeProgress != nil
-                && state.importFailures.map(\.file.url) == [lateBad]
+            state.importFailures.map(\.file.url) == [lateBad]
         }
         XCTAssertTrue(resurfaced,
                       "a later failure must re-surface the banner without the dismissed one")
@@ -328,13 +340,21 @@ private struct DeletingTrasher: Trashing {
 
 /// Decodes instantly except for one gated file: `hasStarted` flips (polled by
 /// the test) and the decode blocks on `open()` until the commit has landed.
+/// `failIDs` fail immediately; the gated file fails after `open()` when
+/// `gatedError` is set, so a test can order a failure after the handoff.
 private final class GatedMidDecodeDecoder: RawDecoding, @unchecked Sendable {
     let gatedID: String
+    let failIDs: Set<String>
+    let gatedError: DecodeError?
     private let release = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var started = false
 
-    init(gatedID: String) { self.gatedID = gatedID }
+    init(gatedID: String, failIDs: Set<String> = [], gatedError: DecodeError? = nil) {
+        self.gatedID = gatedID
+        self.failIDs = failIDs
+        self.gatedError = gatedError
+    }
 
     var hasStarted: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -344,9 +364,14 @@ private final class GatedMidDecodeDecoder: RawDecoding, @unchecked Sendable {
     func open() { release.signal() }
 
     func decodeRaw(at url: URL, options: DecodeOptions) throws -> RawBitmap {
-        if RawFileIdentity.fileID(for: url) == gatedID {
+        let id = RawFileIdentity.fileID(for: url)
+        if id == gatedID {
             lock.lock(); started = true; lock.unlock()
             release.wait()
+            if let gatedError { throw gatedError }
+        }
+        if failIDs.contains(id) {
+            throw DecodeError.cannotUnpack("stub failure")
         }
         return RawBitmap(image: TestFixtures.makeCGImage(width: 4, height: 4, color: 9),
                          width: 4, height: 4, flip: 0)

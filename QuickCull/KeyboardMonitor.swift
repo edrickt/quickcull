@@ -33,20 +33,29 @@ final class KeyboardMonitor {
         loupeToken = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             guard event.keyCode == 49 else { return event }
             let flags = event.modifierFlags
-            // Space is the loupe only when the loupe can start; the same
-            // predicate AppState.setLoupeActive enforces decides that, so the
-            // key is never swallowed for a loupe that cannot appear.
+            // Space is the loupe only when the loupe can start, and a release
+            // must always end a live hold; the same predicate AppState uses is
+            // the single source of truth for both, so the key is never
+            // swallowed for a loupe that cannot appear and a hold cannot
+            // outlive its release.
             guard KeyRouter.consumesLoupeSpace(
                 hasCommand: flags.contains(.command),
                 hasControl: flags.contains(.control),
                 hasOption: flags.contains(.option),
                 systemOwnsKeys: Self.systemOwnsKeys,
-                canActivateLoupe: appState.canActivateLoupe
+                canActivateLoupe: appState.canActivateLoupe,
+                isKeyUp: event.type == .keyUp,
+                isLoupeActive: appState.isLoupeActive
             ) else { return event }
-            if event.type == .keyDown, event.isARepeat { return nil }
-            let isDown = event.type == .keyDown
-            Task { @MainActor in appState.setLoupeActive(isDown) }
-            return nil // consume Space while scrubbing
+            if event.type == .keyDown {
+                if event.isARepeat { return nil }
+                Task { @MainActor in appState.setLoupeActive(true) }
+            } else {
+                // setLoupeActive(false) clears the hold even where the
+                // predicate just went false (see `consumesLoupeSpace`).
+                Task { @MainActor in appState.setLoupeActive(false) }
+            }
+            return nil // consume Space while it belongs to the loupe
         }
     }
 

@@ -579,6 +579,31 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertEqual(loads.count, before, "a slot this window does not want must not load")
         XCTAssertNil(window.image(at: 2))
     }
+
+    /// A window dropped mid-fill (New Session, a re-import, a commit that
+    /// emptied the session) must cancel its queued loads. Nobody can show their
+    /// results, and an un-cancelled display fill keeps decoding its whole
+    /// extent at full resolution against the session that replaced it.
+    func testDiscardingAWindowCancelsItsInFlightLoads() async {
+        let gate = AsyncGate()
+        let started = Counter()
+        let cancelled = Counter()
+        var window: ImageWindow? = ImageWindow(policy: WindowPolicy(radius: 0), ids: ["a"],
+                                               loader: { _ in
+            started.append("a")
+            await gate.wait()
+            if Task.isCancelled { cancelled.append("a") }
+            return TestFixtures.makeCGImage(width: 4, height: 4, color: 1)
+        })
+        window?.setCurrent(0)
+        let loadStarted = await waitUntil { started.count == 1 }
+        XCTAssertTrue(loadStarted, "precondition: the load is parked on the gate")
+
+        window = nil
+        await gate.open()
+        let sawCancellation = await waitUntil { cancelled.count == 1 }
+        XCTAssertTrue(sawCancellation, "a discarded window must cancel its in-flight decode")
+    }
 }
 
 /// Async gate for tests: loaders park on it until the test opens it. Unlike a
