@@ -117,7 +117,7 @@ Build the test bundle, then run it directly with `xcrun xctest`:
 
     xcrun xctest /tmp/qc-dd/Build/Products/Debug/QuickCullCoreTests.xctest
 
-302 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
+309 tests cover the decoder, cache, session, windows, key map, commit, move, and the full import pipeline.
 
 #### Fixtures
 
@@ -137,3 +137,6 @@ QuickCull dynamically links LibRaw, LGPL-2.1, to decode raw files. The library i
 
 - Undo of a Trash or Move commit
 - Persistent flags across sessions
+- App Sandbox and Hardened Runtime: the app is ad-hoc signed for local use and ships with
+  `get-task-allow` removed, but it is not sandboxed and library validation stays off (a
+  Developer ID decision, not a one-line change)

@@ -56,6 +56,14 @@ fi
 echo "Verifying signature…"
 codesign --verify --deep --strict --verbose=2 "$SRC" 2>&1 | tail -n 5
 
+# A shipped build must not be attachable for debugging. Release sets
+# CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO; this check fails the install if a
+# stale build or a command-line override puts the entitlement back.
+if codesign -d --entitlements - "$SRC" 2>/dev/null | grep -q "com.apple.security.get-task-allow"; then
+  echo "Release build carries com.apple.security.get-task-allow; refusing to install." >&2
+  exit 1
+fi
+
 # Quit running instance so the copy isn't busy
 echo "Quitting running QuickCull (if any)…"
 osascript -e 'tell application "QuickCull" to quit' >/dev/null 2>&1 || true
