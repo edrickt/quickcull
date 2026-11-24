@@ -49,6 +49,15 @@ public final class ImageWindow {
     /// Identities whose resident image is a reduced-size placeholder; the
     /// upgrade pass re-runs them once they enter the tier.
     private var degradedIDs: Set<String> = []
+    /// Identities whose full-resolution upgrade came back empty (the cache
+    /// JPEG vanished or failed to decode). Without this, a failed upgrade was
+    /// indistinguishable from one that had not been attempted yet: the
+    /// completion retry and the `setCurrent` upgrade pass re-armed each other
+    /// forever and the app pegged a core on a decode that could never succeed
+    /// (QC-02). Only a decode landing in the cache (`refresh(id:)`) clears the
+    /// mark; a projection change cannot affect the cache, so `retarget` keeps
+    /// it.
+    private var upgradeFailedIDs: Set<String> = []
     /// Identities with a load in flight, and the task that owns it, so a
     /// superseded load can be cancelled before it burns a decode.
     private var inFlightIDs: Set<String> = []
@@ -148,6 +157,7 @@ public final class ImageWindow {
             guard let position = self.positionsByID[id] else {
                 self.degradedIDs.remove(id)
                 self.refreshPendingIDs.remove(id)
+                self.upgradeFailedIDs.remove(id)
                 return
             }
             let currentKeep = Set(self.policy.window(around: self.currentIndex, count: self.count))
@@ -155,6 +165,7 @@ public final class ImageWindow {
             guard currentKeep.contains(position) else {
                 self.degradedIDs.remove(id)
                 self.refreshPendingIDs.remove(id)
+                self.upgradeFailedIDs.remove(id)
                 return
             }
             if let image {
@@ -164,6 +175,7 @@ public final class ImageWindow {
                 // clearing it up front made the loupe claim "100%" over the
                 // half-size placeholder for the length of the upgrade decode.
                 if useReduced { self.degradedIDs.insert(id) } else { self.degradedIDs.remove(id) }
+                self.upgradeFailedIDs.remove(id)
             } else if Task.isCancelled {
                 // The decode was cancelled before it started (eviction, or a
                 // superseded tier) but the identity is wanted again. Retry,
@@ -180,12 +192,19 @@ public final class ImageWindow {
                 self.startLoad(position)
                 return
             }
-            // Landing inside the full tier while a reduced placeholder was still
-            // in flight must upgrade now: the `setCurrent` pass that would have
-            // done it skipped this index because a load was in flight.
-            if let isOutsideFullTier = self.isOutsideFullTier,
-               self.degradedIDs.contains(id),
-               !isOutsideFullTier(position, self.currentIndex) {
+            if image == nil {
+                // A full-resolution attempt that produced nothing is remembered
+                // instead of re-armed: retrying it can never succeed until the
+                // cache changes (QC-02). The reduced placeholder that is still
+                // resident is not a reason to try again.
+                if !useReduced { self.upgradeFailedIDs.insert(id) }
+            } else if !self.upgradeFailedIDs.contains(id),
+                      let isOutsideFullTier = self.isOutsideFullTier,
+                      self.degradedIDs.contains(id),
+                      !isOutsideFullTier(position, self.currentIndex) {
+                // A reduced placeholder that landed after the tier moved must
+                // upgrade now: the `setCurrent` pass skipped this index because
+                // a load was in flight.
                 self.startLoad(position)
             }
         }
@@ -221,7 +240,8 @@ public final class ImageWindow {
         // loupe is always true 1:1 even after a far jump.
         if let isOutsideFullTier {
             for i in windowSet
-            where isDegraded(i) && !isOutsideFullTier(i, currentIndex) && !isInFlight(i) {
+            where isDegraded(i) && !isOutsideFullTier(i, currentIndex) && !isInFlight(i)
+                && !upgradeFailedIDs.contains(ids[i]) {
                 startLoad(i)
             }
         }
@@ -239,12 +259,18 @@ public final class ImageWindow {
     /// the cache. The import keeps decoding after culling opens (see
     /// `AppState.earlyViewThreshold`), so a slot that loaded before its photo
     /// was decoded would otherwise stay empty until the user scrubbed away and
-    /// back. No-op for identity outside this window's residency and for an
-    /// image that is already resident.
+    /// back. A degraded placeholder in the tier is re-run too: the new cache
+    /// entry is exactly the event a failed full-res upgrade was waiting for.
+    /// No-op outside this window's residency and for an image that is already
+    /// full-resolution.
+    ///
+    /// This is the only place that clears `upgradeFailedIDs` (QC-02).
     public func refresh(id: String) {
-        guard let position = positionsByID[id], images[position] == nil, isWanted(position) else {
-            return
-        }
+        upgradeFailedIDs.remove(id)
+        guard let position = positionsByID[id], isWanted(position) else { return }
+        let wantsUpgrade = degradedIDs.contains(id)
+            && !(isOutsideFullTier?(position, currentIndex) ?? true)
+        guard images[position] == nil || wantsUpgrade else { return }
         if inFlightIDs.contains(id) {
             refreshPendingIDs.insert(id)
             return
@@ -324,6 +350,7 @@ public final class ImageWindow {
             let id = ids[i]
             degradedIDs.remove(id)
             refreshPendingIDs.remove(id)
+            upgradeFailedIDs.remove(id)
             // Cancel, but leave the in-flight marker and token to the task
             // itself. The decode cannot be interrupted once it starts, so
             // dropping the marker here would let the same identity decode twice
@@ -364,6 +391,9 @@ public final class ImageWindow {
         inFlightIDs.formIntersection(newPositions.keys)
         degradedIDs.formIntersection(newPositions.keys)
         refreshPendingIDs.formIntersection(newPositions.keys)
+        // Deliberately not cleared: a filter switch cannot change the cache,
+        // so it must not re-arm a doomed decode (QC-02 correction).
+        upgradeFailedIDs.formIntersection(newPositions.keys)
 
         // Resident images follow their identity to its new position.
         var remapped: [Int: CGImage] = [:]

@@ -291,6 +291,59 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertNotNil(window.image(at: 20), "a slot outside the first residency window must load too")
     }
 
+    /// QC-02: a full-res upgrade that returns nil (the cache JPEG vanished
+    /// under a running session) must settle. Nothing distinguished "failed"
+    /// from "not attempted", so the completion retry and the `setCurrent`
+    /// upgrade pass re-armed each other and the app burned a core on a decode
+    /// that could never succeed. Two probes: no re-arm, and a decode that lands
+    /// in the cache is a real reason to retry.
+    func testAFailedFullResUpgradeDoesNotRetryForever() async {
+        final class Flag: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = false
+            var isOn: Bool {
+                get { lock.lock(); defer { lock.unlock() }; return value }
+                set { lock.lock(); defer { lock.unlock() }; value = newValue }
+            }
+        }
+        let canFail = Flag()
+        let fullCalls = Counter()
+        let full = TestFixtures.makeCGImage(width: 64, height: 64, color: 1)
+        let reduced = TestFixtures.makeCGImage(width: 32, height: 32, color: 2)
+        let window = ImageWindow(behind: 3, ahead: 3, count: 10,
+                                 loader: { index in
+                                     fullCalls.append("#\(index)")
+                                     return canFail.isOn ? full : nil
+                                 },
+                                 reducedLoader: { _ in reduced },
+                                 isOutsideFullTier: { index, current in abs(index - current) > 1 })
+        window.setCurrent(5)   // full tier 4,5,6 fail; ring 2,3,7,8 holds placeholders
+        await window.waitUntilSettled(timeout: 2)
+        XCTAssertNotNil(window.image(at: 2), "precondition: a half-size placeholder is resident")
+        XCTAssertEqual(window.isFullResolution(at: 2), false)
+
+        window.setCurrent(2)   // 2 enters the tier; its upgrade fails
+        await window.waitUntilSettled(timeout: 2)
+        XCTAssertEqual(fullCalls.count(of: "#2"), 1,
+                       "a failed upgrade must not be retried by the upgrade pass")
+        XCTAssertNotNil(window.image(at: 2), "the placeholder must stay resident")
+
+        // Scrubbing away and back must not re-arm the doomed decode either.
+        window.setCurrent(5)
+        await window.waitUntilSettled(timeout: 2)
+        window.setCurrent(2)
+        await window.waitUntilSettled(timeout: 2)
+        XCTAssertEqual(fullCalls.count(of: "#2"), 1,
+                       "setCurrent must not re-arm a failed upgrade")
+
+        // A preview that lands in the cache is a genuine reason to retry.
+        canFail.isOn = true
+        window.refresh(id: "#2")
+        await window.waitUntilSettled(timeout: 2)
+        XCTAssertEqual(window.image(at: 2)?.width, 64, "refresh must retry the failed upgrade")
+        XCTAssertTrue(window.isFullResolution(at: 2))
+    }
+
     /// Landing on an index while its reduced load is still in flight must still
     /// upgrade it: the `setCurrent` upgrade pass skips in-flight indices, so the
     /// completion is the only place that can notice the tier moved.
@@ -468,6 +521,7 @@ final class ImageWindowTests: XCTestCase {
         func append(_ item: String) { lock.lock(); defer { lock.unlock() }; items.append(item) }
         var snapshot: [String] { lock.lock(); defer { lock.unlock() }; return items }
         var count: Int { snapshot.count }
+        func count(of item: String) -> Int { snapshot.filter { $0 == item }.count }
         func contains(_ item: String) -> Bool { snapshot.contains(item) }
     }
 
