@@ -139,6 +139,32 @@ final class AppStateEarlyViewTests: XCTestCase {
         XCTAssertEqual(state.phase, .scrubbing)
     }
 
+    /// QS-01: the per-failure path re-mapped every window and re-sorted the
+    /// failure list once per failed file, which made the tail of a broken
+    /// import quadratic (1.6 s for 740 failures at N=800). Failures that land
+    /// together must be handled as a batch: the end state is the same, the
+    /// number of window re-maps is not.
+    func testAManyFailureImportCoalescesWindowRemaps() async throws {
+        let count = 240
+        let files = try makeFiles(count: count)
+        let failIDs = Set(files.dropFirst(3).map { RawFileIdentity.fileID(for: $0) })
+        let state = makeState(decoder: StubDecoder(failIDs: failIDs), threshold: 3)
+
+        state.importFiles(urls: files)
+        let finished = await waitUntil(timeout: 20) {
+            state.backgroundDecodeProgress == nil && state.phase == .scrubbing
+        }
+        XCTAssertTrue(finished, "the import must settle")
+        XCTAssertEqual(state.session?.count, 3, "failed previews cannot be viewed")
+        XCTAssertEqual(state.importFailures.count, count - 3)
+        XCTAssertEqual(state.thumbWindow?.count, 3)
+        XCTAssertEqual(state.displayImages?.count, 3)
+
+        let remaps = state.displayImages?.retargetCount ?? 0
+        XCTAssertLessThan(remaps, 30,
+                          "a burst of \(count - 3) failures must not re-map the window once each")
+    }
+
     /// A failure landing after viewing opened is dropped from the session
     /// right away and surfaced, not left behind a spinner until the import
     /// finishes. The windows are position-addressed, so they must be re-mapped

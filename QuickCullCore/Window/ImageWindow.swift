@@ -72,6 +72,10 @@ public final class ImageWindow {
     private var refreshPendingIDs: Set<String> = []
     private var nextLoadToken = 0
     private var currentIndex: Int = 0
+    /// Retargets applied to this window. Counted so a test can pin that a burst
+    /// of import failures is coalesced into one re-map instead of re-mapping
+    /// the window once per failure (QS-01).
+    @ObservationIgnored private(set) var retargetCount = 0
     /// The same tasks in a reference box, so a window dropped mid-fill can
     /// cancel them from `deinit` (a `@MainActor`-isolated dictionary cannot be
     /// read there). Entries are removed when a load settles or when a retarget
@@ -372,6 +376,7 @@ public final class ImageWindow {
     public func retarget(ids newIDs: [String]) {
         let oldIDs = ids
         guard newIDs != oldIDs else { return }
+        retargetCount += 1
         assert(Set(newIDs).count == newIDs.count, "ImageWindow identities must be unique")
         let currentID = oldIDs.indices.contains(currentIndex) ? oldIDs[currentIndex] : nil
 

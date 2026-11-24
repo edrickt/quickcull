@@ -315,6 +315,14 @@ public final class AppState {
             var failures: [DecodeOutcome] = []
             var failedIDs: Set<String> = []
             var isViewing = false
+            // Mid-import failures are applied in batches: one session removal,
+            // one window re-map and one banner re-sort per batch. Doing that
+            // work per failed file made the tail of a broken import quadratic
+            // (QS-01). The first failure of a burst flushes immediately so a
+            // lone failure still leaves the viewer in the same turn.
+            let failureFlushInterval: CFAbsoluteTime = 0.2
+            var pendingFailureFiles: [SessionFile] = []
+            var lastFailureFlush: CFAbsoluteTime = 0
 
             for await event in await engine.decodeAll(files: files) {
                 if Task.isCancelled || generation != sessionGeneration { break }
@@ -331,10 +339,15 @@ public final class AppState {
                         // Mid-import failures must not sit behind a permanent
                         // spinner in the viewer: drop the file now, re-map the
                         // windows (they are position-addressed) and say so.
-                        removeFilesWithoutPreviews([outcome.file])
-                        if let live = session { installWindows(for: live.files) }
-                        surfaceImportFailures(failures, unsupported: unsupportedFailures,
-                                              order: inputOrder)
+                        pendingFailureFiles.append(outcome.file)
+                        let now = CFAbsoluteTimeGetCurrent()
+                        if now - lastFailureFlush >= failureFlushInterval {
+                            lastFailureFlush = now
+                            flushImportFailures(pendingFailureFiles, failures: failures,
+                                                unsupported: unsupportedFailures,
+                                                order: inputOrder)
+                            pendingFailureFiles.removeAll()
+                        }
                     } else {
                         succeeded += 1
                         if isViewing {
@@ -368,6 +381,17 @@ public final class AppState {
                     processed = completed
                     if isViewing {
                         backgroundDecodeProgress = ImportProgress(completed: completed, total: total)
+                        // The stream can pause between failures; do not leave a
+                        // buffered batch behind for the rest of the import.
+                        let now = CFAbsoluteTimeGetCurrent()
+                        if !pendingFailureFiles.isEmpty,
+                           now - lastFailureFlush >= failureFlushInterval {
+                            lastFailureFlush = now
+                            flushImportFailures(pendingFailureFiles, failures: failures,
+                                                unsupported: unsupportedFailures,
+                                                order: inputOrder)
+                            pendingFailureFiles.removeAll()
+                        }
                     } else {
                         phase = .decoding(completed: completed, total: total)
                     }
@@ -380,6 +404,11 @@ public final class AppState {
                         // post-removal list.
                         removeFilesWithoutPreviews(
                             outcomes.compactMap { failedIDs.contains($0.file.id) ? $0.file : nil })
+                    } else if !pendingFailureFiles.isEmpty {
+                        flushImportFailures(pendingFailureFiles, failures: failures,
+                                            unsupported: unsupportedFailures,
+                                            order: inputOrder)
+                        pendingFailureFiles.removeAll()
                     }
                     surfaceImportFailures(failures, unsupported: unsupportedFailures,
                                           order: inputOrder)
@@ -398,6 +427,24 @@ public final class AppState {
                 }
             }
         }
+    }
+
+    /// Applies a batch of mid-import decode failures: drop the files, re-map
+    /// the windows over the post-removal projection and report them. One
+    /// session removal and one re-map per batch, not per failed file (QS-01).
+    private func flushImportFailures(_ files: [SessionFile],
+                                     failures: [DecodeOutcome],
+                                     unsupported: [DecodeOutcome],
+                                     order: [String: Int]) {
+        // A commit can land between the failure and the flush; a file that is
+        // already gone is not removed a second time.
+        let live = session
+        let pending = files.filter { live?.contains(id: $0.id) ?? false }
+        if !pending.isEmpty {
+            removeFilesWithoutPreviews(pending)
+            if let live = session { installWindows(for: live.files) }
+        }
+        surfaceImportFailures(failures, unsupported: unsupported, order: order)
     }
 
     /// Removes files whose full-size preview could not be cached, so the
