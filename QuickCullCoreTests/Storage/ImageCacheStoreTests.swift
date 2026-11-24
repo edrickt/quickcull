@@ -68,6 +68,32 @@ final class ImageCacheStoreTests: XCTestCase {
                       "the stored preview must still be reachable")
     }
 
+    /// QS-04: identity is the resolved target, so the cache key's stat must be
+    /// the target's too — a symlink's own size and mtime describe the link, not
+    /// the photo. Both the write and the fallback must name the same key when
+    /// the link (and the card) are gone.
+    func testCacheKeyForASymlinkedPhotoUsesTheTarget() async throws {
+        let card = try TestFixtures.makeTempDir(name: "symlink-card")
+        let picks = try TestFixtures.makeTempDir(name: "symlink-picks")
+        defer { try? FileManager.default.removeItem(at: card)
+                try? FileManager.default.removeItem(at: picks) }
+        let target = try TestFixtures.makeRawFile(named: "IMG_0001.CR2", in: card)
+        let link = picks.appendingPathComponent("IMG_0001.CR2")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        let file = SessionFile(url: link)
+
+        let stored = try await store.storeJPEG(
+            RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+                      width: 32, height: 16, flip: 0), for: file)
+        // The picks folder and the card both leave.
+        try FileManager.default.removeItem(at: link)
+        try FileManager.default.removeItem(at: target)
+
+        let after = try await store.cacheURL(for: file)
+        XCTAssertEqual(after, stored, "the link's own stat is not the photo's cache key")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: after.path))
+    }
+
     func testStoreJPEGWritesDecodableJPEGAtQ75() async throws {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
         let destination = try await store.storeJPEG(RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),

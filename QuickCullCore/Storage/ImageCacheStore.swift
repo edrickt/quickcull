@@ -69,7 +69,9 @@ public actor ImageCacheStore {
     /// it, so it must not queue behind the cache's isolation.
     public nonisolated func cacheURL(for file: SessionFile) throws -> URL {
         var key = file.id
-        if let signature = SessionFile.statSignature(of: file.url) ?? file.statSignature {
+        // Stat the resolved target: a symlink's own size/mtime describe the
+        // link, and identity is the target (QS-04).
+        if let signature = SessionFile.statSignature(of: file.resolvedURL) ?? file.statSignature {
             key = "\(file.id)|\(signature)"
         }
         let digest = SHA256.hash(data: Data(key.utf8))
