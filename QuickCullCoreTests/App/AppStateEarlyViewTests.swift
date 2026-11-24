@@ -139,6 +139,42 @@ final class AppStateEarlyViewTests: XCTestCase {
         XCTAssertEqual(state.phase, .scrubbing)
     }
 
+    /// QS-02: a preview that decodes but cannot be written to the cache is an
+    /// import-level condition (disk full, unwritable cache volume), not a
+    /// broken photo. It removed the file from the session like a decode
+    /// failure, so a full disk silently discarded the shoot — with the flags —
+    /// and the only recovery wiped the previews that did land. Stop the import,
+    /// keep every file, and report one actionable failure.
+    func testACacheWriteFailureKeepsTheShootAndStopsTheImport() async throws {
+        let files = try makeFiles(count: 6)
+        // A regular file where the cache directory should be: every storeJPEG
+        // fails the way a full or read-only cache volume does.
+        let blocked = tempDir.appendingPathComponent("not-a-cache-directory")
+        try Data("blocked".utf8).write(to: blocked)
+        let brokenCache = ImageCacheStore(baseURL: blocked)
+        let state = AppState(decoder: StubDecoder(), cache: brokenCache,
+                             earlyViewThreshold: 2)
+
+        state.importFiles(urls: files)
+        let settled = await waitUntil(timeout: 20) {
+            state.phase == .scrubbing && state.backgroundDecodeProgress == nil
+        }
+        XCTAssertTrue(settled, "a disk-level failure must stop the import, not leave it running")
+        XCTAssertEqual(state.session?.count, files.count,
+                       "a cache-write failure must not remove the photo from the session")
+        XCTAssertNotNil(state.session, "the shoot must survive a transient disk condition")
+        XCTAssertEqual(state.importFailures.count, 1, "one actionable import-level failure")
+        if case .cannotStorePreview? = state.importFailures.first?.error {
+            // expected: the banner can tell the user to free disk space
+        } else {
+            XCTFail("the failure must name the cache write, not a decode")
+        }
+        for file in files {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path),
+                          "nothing was trashed or moved")
+        }
+    }
+
     /// QS-01: the per-failure path re-mapped every window and re-sorted the
     /// failure list once per failed file, which made the tail of a broken
     /// import quadratic (1.6 s for 740 failures at N=800). Failures that land

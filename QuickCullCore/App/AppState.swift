@@ -324,7 +324,9 @@ public final class AppState {
             var pendingFailureFiles: [SessionFile] = []
             var lastFailureFlush: CFAbsoluteTime = 0
 
-            for await event in await engine.decodeAll(files: files) {
+            // Set when a preview decoded but could not be written to the cache.
+            var cacheFailure: DecodeOutcome?
+            importLoop: for await event in await engine.decodeAll(files: files) {
                 if Task.isCancelled || generation != sessionGeneration { break }
                 switch event {
                 case .fileCompleted(let outcome):
@@ -333,6 +335,16 @@ public final class AppState {
                         // import was still running is not a decode failure to
                         // report, and it is already out of the session.
                         guard let live = session, live.contains(id: outcome.file.id) else { break }
+                        if case .cannotStorePreview = outcome.error {
+                            // The photo is fine; the cache volume is not (disk
+                            // full, read-only, unwritable). This is an
+                            // import-level condition: stopping here and keeping
+                            // every file lets the shoot survive freeing the
+                            // disk, where the per-file path discarded it
+                            // (QS-02).
+                            cacheFailure = outcome
+                            break importLoop
+                        }
                         failedIDs.insert(outcome.file.id)
                         failures.append(outcome)
                         guard isViewing else { break }
@@ -425,6 +437,28 @@ public final class AppState {
                         transitionToEmptySession()
                     }
                 }
+            }
+
+            if let cacheFailure {
+                backgroundDecodeProgress = nil
+                // Files that really failed to decode still leave the session;
+                // the photo whose preview could not be stored stays, and so
+                // does every file that was never decoded.
+                let failedFiles = failures.map(\.file)
+                    .filter { session?.contains(id: $0.id) ?? false }
+                removeFilesWithoutPreviews(failedFiles)
+                if let live = session {
+                    if isViewing {
+                        installWindows(for: live.files)
+                    } else {
+                        finishDecoding(files: live.files)
+                    }
+                }
+                // One actionable failure for the whole import, not one per
+                // photo that hit the same unwritable cache.
+                surfaceImportFailures(failures + [cacheFailure],
+                                      unsupported: unsupportedFailures,
+                                      order: inputOrder)
             }
         }
     }
