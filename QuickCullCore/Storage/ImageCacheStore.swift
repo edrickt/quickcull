@@ -70,9 +70,15 @@ public actor ImageCacheStore {
     public nonisolated func cacheURL(for file: SessionFile) throws -> URL {
         var key = file.id
         // Stat the resolved target: a symlink's own size/mtime describe the
-        // link, and identity is the target (QS-04).
-        if let signature = SessionFile.statSignature(of: file.resolvedURL) ?? file.statSignature {
-            key = "\(file.id)|\(signature)"
+        // link, and identity is the target (QS-04). A successful stat is
+        // remembered as the fallback, so a later read after the source is gone
+        // names the key the last write used even if the mtime changed
+        // mid-session (QC-01).
+        if let live = SessionFile.statSignature(of: file.resolvedURL) {
+            file.recordStatSignature(live)
+            key = "\(file.id)|\(live)"
+        } else if let captured = file.statSignature {
+            key = "\(file.id)|\(captured)"
         }
         let digest = SHA256.hash(data: Data(key.utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()

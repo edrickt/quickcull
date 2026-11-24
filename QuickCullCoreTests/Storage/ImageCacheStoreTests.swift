@@ -68,6 +68,33 @@ final class ImageCacheStoreTests: XCTestCase {
                       "the stored preview must still be reachable")
     }
 
+    /// QC-01 edge: the fallback must name the preview that was last written,
+    /// not the one the import started with. A file whose mtime changes while
+    /// the session runs gets a new key; if it is removed afterwards, falling
+    /// back to the import-time signature would split read from write again.
+    func testCacheKeyAfterRemovalFallsBackToTheLastObservedStat() async throws {
+        let source = try TestFixtures.makeRawFile(named: "changed.cr2", in: base)
+        let file = SessionFile(url: source)
+        _ = try await store.cacheURL(for: file)
+
+        // Same size, newer mtime: the live key changes (as it must).
+        let sameSize = try Data(contentsOf: source)
+        try sameSize.write(to: source)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(300)], ofItemAtPath: source.path)
+        let whilePresent = try await store.cacheURL(for: file)
+        let stored = try await store.storeJPEG(
+            RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+                      width: 32, height: 16, flip: 0), for: file)
+        XCTAssertEqual(stored, whilePresent)
+
+        try FileManager.default.removeItem(at: source)
+        let afterRemoval = try await store.cacheURL(for: file)
+        XCTAssertEqual(afterRemoval, whilePresent,
+                       "the fallback must be the last stat the file was keyed under")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: afterRemoval.path))
+    }
+
     /// QS-04: identity is the resolved target, so the cache key's stat must be
     /// the target's too — a symlink's own size and mtime describe the link, not
     /// the photo. Both the write and the fallback must name the same key when
