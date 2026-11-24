@@ -105,7 +105,7 @@ Fixtures: 11 pinned raw samples in `QuickCullCoreTests/Fixtures/raws/` are track
 
 - `xcodebuild` is the only authoritative type check. The editor's Swift language server reports cross-file "Cannot find type" noise; see `AGENTS.md`.
 - The Xcode project uses `PBXFileSystemSynchronizedRootGroup`: a new file under `QuickCull/`, `QuickCullCore/` or `QuickCullCoreTests/` joins its target automatically. Do not add file references by hand.
-- `docs/audits/2026-11-08-code-quality-audit-round3.md` is a snapshot at baseline `bdbcb97` (it says 272 tests; the tree has 309). Treat its states, counts and line anchors as historical.
+- `docs/audits/2026-11-08-code-quality-audit-round3.md` is a snapshot at baseline `bdbcb97` (it says 272 tests; the tree has 310). Treat its states, counts and line anchors as historical.
 - Flags live only in memory. There is no flags file, no undo log and no persistence layer to change.
 - Cache identity comes from `RawFileIdentity.fileID`, which resolves symlinks. A duplicate photo or a stale preview is usually an identity or cache-key bug, not a decode bug.
 - `Scripts/verify-control-bar.swift` and `Scripts/verify-dropdown.swift` mirror the app UI by hand and are not built by Xcode; update them when `ScrubView` or `DropdownMenu` changes.
