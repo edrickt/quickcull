@@ -63,6 +63,27 @@ final class AppStateMoveTests: XCTestCase {
         XCTAssertFalse(s.isMoving)
     }
 
+    /// QS-03 end-to-end: the session removed the files a same-folder move
+    /// "moved" and deleted their cached previews, so flagged photos vanished
+    /// from the cull while remaining on disk, with no alert. Nothing moved, so
+    /// the files stay and the move reports a failure.
+    func testMoveIntoTheSourceFolderKeepsTheFilesAndReportsAFailure() async throws {
+        let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
+        let b = try TestFixtures.makeRawFile(named: "b.cr2", in: tempDir)
+        let s = makeState()
+        s.importFiles(urls: [a, b]); await waitForScrubbing(s)
+        s.handle(.toggleFlag(.red)); s.handle(.next); s.handle(.toggleFlag(.red))
+        XCTAssertTrue(s.requestMove(to: tempDir))
+        await s.confirmMove()
+
+        XCTAssertEqual(s.session?.count, 2, "a move that did nothing must not remove the photos")
+        XCTAssertEqual(s.moveFailures.count, 2)
+        XCTAssertEqual(s.pendingMoveCount, 0)
+        XCTAssertFalse(s.isMoving)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: a.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: b.path))
+    }
+
     func testConfirmMoveEmptiesSessionResetsPhase() async throws {
         let a = try TestFixtures.makeRawFile(named: "a.cr2", in: tempDir)
         let s = makeState()

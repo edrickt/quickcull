@@ -65,14 +65,19 @@ final class MoveCommitTests: XCTestCase {
         XCTAssertFalse(outcomes[0].succeeded)
     }
 
-    func testMoveIntoTheSourceFolderIsANoOp() throws {
+    /// QS-03: a move into the folder the file already lives in must not report
+    /// the durable change the session then acts on. Nothing moved, so the file
+    /// has to stay in the session (a failure outcome), not disappear as if it
+    /// had been moved.
+    func testMoveIntoTheSourceFolderReportsNothingMoved() throws {
         let dir = try TestFixtures.makeTempDir(name: "move-self")
         defer { try? FileManager.default.removeItem(at: dir) }
         let source = dir.appendingPathComponent("a.jpg")
         try Data("src".utf8).write(to: source)
         let file = SessionFile(url: source)
         let outcomes = MoveCommit(mover: FileManagerMover()).commit(files: [file], to: dir)
-        XCTAssertTrue(outcomes[0].succeeded)
+        XCTAssertFalse(outcomes[0].succeeded, "nothing moved, so this is not a success")
+        XCTAssertEqual(outcomes[0].error as? MoveError, .sameDirectory)
         // Nothing renamed in place, and no "a 1.jpg" copy appeared.
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["a.jpg"])
         XCTAssertEqual(try Data(contentsOf: source), Data("src".utf8))
@@ -94,7 +99,8 @@ final class MoveCommitTests: XCTestCase {
         let outcomes = MoveCommit(mover: FileManagerMover())
             .commit(files: [SessionFile(url: source)], to: link)
 
-        XCTAssertTrue(outcomes[0].succeeded)
+        XCTAssertFalse(outcomes[0].succeeded, "the symlinked destination is the source folder")
+        XCTAssertEqual(outcomes[0].error as? MoveError, .sameDirectory)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["a.jpg"],
                        "no in-place rename through the alias")
         XCTAssertEqual(try Data(contentsOf: source), Data("src".utf8))
@@ -113,7 +119,8 @@ final class MoveCommitTests: XCTestCase {
         let dotted = dir.appendingPathComponent("../shoot")
         let outcomes = MoveCommit(mover: FileManagerMover())
             .commit(files: [SessionFile(url: source)], to: dotted)
-        XCTAssertTrue(outcomes[0].succeeded)
+        XCTAssertFalse(outcomes[0].succeeded)
+        XCTAssertEqual(outcomes[0].error as? MoveError, .sameDirectory)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), ["a.jpg"])
     }
 }

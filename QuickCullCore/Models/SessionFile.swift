@@ -14,10 +14,19 @@ public struct SessionFile: Identifiable, Hashable, Sendable {
     /// stat-ed yet (a fixture path that does not exist on disk).
     public let statSignature: String?
 
+    /// The same file with symlinks resolved: what the identity and the cache
+    /// key already name, and the only path a destructive operation may touch.
+    /// `url` is the spelling the user picked and is for display only, so a
+    /// photo imported through a symlink must be trashed/moved at the target,
+    /// not at the link (QS-04).
+    public let resolvedURL: URL
+
     public init(url: URL) {
+        let resolved = url.resolvingSymlinksInPath()
         self.url = url
-        self.id = RawFileIdentity.fileID(for: url)
-        self.statSignature = Self.statSignature(of: url)
+        self.resolvedURL = resolved
+        self.id = RawFileIdentity.fileID(for: resolved)
+        self.statSignature = Self.statSignature(of: resolved)
     }
 
     /// Size + modification time in microseconds: exactly the two fields

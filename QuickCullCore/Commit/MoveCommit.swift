@@ -11,6 +11,13 @@ public struct FileManagerMover: Moving {
     }
 }
 
+public enum MoveError: Error, Equatable {
+    /// The file already lives in the destination folder. Nothing was moved, so
+    /// reporting success would let the session discard a photo that is still
+    /// on disk (QS-03).
+    case sameDirectory
+}
+
 public struct MoveOutcome {
     public let file: SessionFile
     public let error: Error?
@@ -26,8 +33,8 @@ public struct MoveCommit {
     public init(mover: Moving) { self.mover = mover }
 
     public func autoRenamedDestination(for file: SessionFile, in folder: URL) -> URL {
-        let base = file.url.deletingPathExtension().lastPathComponent
-        let ext = file.url.pathExtension
+        let base = file.resolvedURL.deletingPathExtension().lastPathComponent
+        let ext = file.resolvedURL.pathExtension
         var candidate = folder.appendingPathComponent(ext.isEmpty ? base : "\(base).\(ext)")
         var suffix = 1
         while FileManager.default.fileExists(atPath: candidate.path) {
@@ -41,15 +48,18 @@ public struct MoveCommit {
     public func commit(files: [SessionFile], to folder: URL) -> [MoveOutcome] {
         let destination = folder.standardizedFileURL
         return files.map { file in
-            // A move into the folder the file already lives in is a no-op.
-            // Without this the collision suffix below finds the file itself at
-            // the destination and renames every original to "name 1.ext" in
-            // place — a mass rename the user never asked for.
-            if Self.isSameDirectory(file.url.deletingLastPathComponent(), destination) {
-                return MoveOutcome(file: file, error: nil)
+            // A move into the folder the file already lives in moves nothing.
+            // Without this check the collision suffix below finds the file
+            // itself at the destination and renames every original to
+            // "name 1.ext" in place — a mass rename the user never asked for.
+            // It is still not a success: the session removes every successful
+            // outcome, which silently dropped photos that never moved (QS-03).
+            let source = file.resolvedURL
+            if Self.isSameDirectory(source.deletingLastPathComponent(), destination) {
+                return MoveOutcome(file: file, error: MoveError.sameDirectory)
             }
-            let base = file.url.deletingPathExtension().lastPathComponent
-            let ext = file.url.pathExtension
+            let base = source.deletingPathExtension().lastPathComponent
+            let ext = source.pathExtension
             var dest = autoRenamedDestination(for: file, in: destination)
             // Derive next suffix for TOCTOU retry: dest is .../base.ext or .../base N.ext
             var nextSuffix: Int = 1
@@ -64,7 +74,7 @@ public struct MoveCommit {
             var attempts = 0
             while attempts < 100 {
                 do {
-                    try mover.move(from: file.url, to: dest)
+                    try mover.move(from: source, to: dest)
                     return MoveOutcome(file: file, error: nil)
                 } catch let cocoaError as NSError
                             where cocoaError.domain == NSCocoaErrorDomain

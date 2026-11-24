@@ -37,7 +37,10 @@ public struct TrashCommit {
     public func commit(files: [SessionFile]) -> [TrashOutcome] {
         files.map { file in
             do {
-                try trasher.trash(url: file.url)
+                // The identity and the cache key already name the resolved
+                // target; trashing the imported path would throw away a symlink
+                // and leave the photo on the card (QS-04).
+                try trasher.trash(url: file.resolvedURL)
                 return TrashOutcome(file: file, error: nil)
             } catch {
                 return TrashOutcome(file: file, error: error)
