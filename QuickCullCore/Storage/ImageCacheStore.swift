@@ -57,18 +57,20 @@ public actor ImageCacheStore {
     }
 
     /// Cache key: SHA256 of "<standardized path>|<size>|<mtime-us>".
-    /// When the source file cannot be stat-ed (deleted mid-session, or a
-    /// synthetic/test file), falls back to the path-only key so the decoded
-    /// bitmap can still be cached deterministically.
+    /// A live stat wins, so a file whose mtime changes still gets a new key.
+    /// When the source cannot be stat-ed (card ejected, file moved or deleted
+    /// mid-session) the key falls back to the signature captured when the file
+    /// entered the session — the one the preview was stored under — instead of
+    /// the path alone, which named no stored preview at all (QC-01). The
+    /// path-only key survives for a file that never existed on disk (a
+    /// synthetic/test file).
     ///
     /// `nonisolated`: it reads no actor state, and every decode worker needs
     /// it, so it must not queue behind the cache's isolation.
     public nonisolated func cacheURL(for file: SessionFile) throws -> URL {
         var key = file.id
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: file.url.path) {
-            let size = (attrs[.size] as? UInt64) ?? 0
-            let mtime = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-            key = "\(file.id)|\(size)|\(Int(mtime * 1_000_000))"
+        if let signature = SessionFile.statSignature(of: file.url) ?? file.statSignature {
+            key = "\(file.id)|\(signature)"
         }
         let digest = SHA256.hash(data: Data(key.utf8))
         let hex = digest.map { String(format: "%02x", $0) }.joined()

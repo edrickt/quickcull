@@ -45,6 +45,29 @@ final class ImageCacheStoreTests: XCTestCase {
         XCTAssertNotEqual(key1, key2)
     }
 
+    /// QC-01: the key embeds the source's size and mtime, and every read
+    /// recomputes it. When the source leaves the volume (card ejected, file
+    /// moved or deleted) a live stat fails; falling back to the path alone
+    /// created a second key that could never name the preview written while
+    /// the file existed. The key captured at import must be the fallback.
+    func testCacheKeyIsStableWhenTheSourceDisappears() async throws {
+        let source = try TestFixtures.makeRawFile(named: "ejected.cr2", in: base)
+        let file = SessionFile(url: source)
+        let stored = try await store.storeJPEG(
+            RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),
+                      width: 32, height: 16, flip: 0), for: file)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stored.path))
+
+        // The card leaves the reader; the preview stays on disk.
+        try FileManager.default.removeItem(at: source)
+
+        let afterEject = try await store.cacheURL(for: file)
+        XCTAssertEqual(afterEject, stored,
+                       "a missing source must not change the cache key")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: afterEject.path),
+                      "the stored preview must still be reachable")
+    }
+
     func testStoreJPEGWritesDecodableJPEGAtQ75() async throws {
         let file = SessionFile(url: try TestFixtures.makeRawFile(named: "a.cr2", in: base))
         let destination = try await store.storeJPEG(RawBitmap(image: TestFixtures.makeCGImage(width: 32, height: 16, color: 128),

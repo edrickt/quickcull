@@ -261,6 +261,36 @@ final class ImageWindowTests: XCTestCase {
         XCTAssertEqual(window.image(at: ringAhead)?.width, 64, "landing upgrades the ring to full-res")
     }
 
+    /// QC-01 end-to-end: once the card leaves the reader the sources are gone,
+    /// but every preview is still on disk. Scrubbing to a photo outside the
+    /// first residency window must load it instead of leaving a spinner.
+    func testDisplayWindowLoadsPreviewsAfterTheSourcesAreGone() async throws {
+        let (cache, base) = try await TestFixtures.makeTempCache()
+        defer { try? FileManager.default.removeItem(at: base) }
+        var files: [SessionFile] = []
+        for i in 0..<25 {
+            let url = fixtureDir.appendingPathComponent("eject\(i).jpg")
+            try TestFixtures.writeJPEG(color: UInt8(i), width: 64, height: 40, to: url)
+            let file = SessionFile(url: url)
+            files.append(file)
+            let bitmap = RawBitmap(image: TestFixtures.makeCGImage(width: 64, height: 40,
+                                                                   color: UInt8(i)),
+                                   width: 64, height: 40, flip: 0)
+            _ = try await cache.storeJPEG(bitmap, for: file)
+        }
+        // Eject: the sources are gone, the previews are not.
+        for file in files { try FileManager.default.removeItem(at: file.url) }
+
+        let window = ImageWindow.display(files: files, cache: cache)
+        window.setCurrent(0)
+        await window.waitUntilSettled()
+        XCTAssertNotNil(window.image(at: 0), "a cached preview must load with its source gone")
+
+        window.setCurrent(20)
+        await window.waitUntilSettled()
+        XCTAssertNotNil(window.image(at: 20), "a slot outside the first residency window must load too")
+    }
+
     /// Landing on an index while its reduced load is still in flight must still
     /// upgrade it: the `setCurrent` upgrade pass skips in-flight indices, so the
     /// completion is the only place that can notice the tier moved.
